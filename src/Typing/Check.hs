@@ -1,8 +1,9 @@
 module Typing.Check where
 
 import Typing.Env
-import Types ( Type(..), RefType(..) )
-import Syntax ( Deref(..), Term(..) )
+import Indices ( Ix(..) )
+import Types ( Type(..), RefType(..), Lft(..), shift )
+import Syntax ( Deref(..), Term(..), Seq(..) )
 
 copy :: Type -> Bool
 copy Unit = True
@@ -52,4 +53,59 @@ typeof env (LitInt n) = (Int, env)
 typeof env LitTrue = (Bool, env)
 typeof env LitFalse = (Bool, env)
 typeof env (LitString str) = (String, env)
-typeof _ _ = undefined
+typeof env (Var ix) = 
+    let (Bind _ status ty') = env `at` ix in
+    let (Ix n _) = ix in
+    if copy ty'
+        then case status of
+            Own -> (shift ty' n, env)
+            Borrow Shr _ -> (shift ty' n, env)
+            _ -> undefined
+        else case status of
+            Own -> (shift ty' n, poison ix env)
+            _ -> undefined
+typeof env (Clone p) = 
+    let ty = deref env p in
+        (ty, env)
+typeof env (Assign p t) =
+    let ty = mut env p in
+    let (ty', env') = typeof env t in
+    if ty == ty' 
+        then (Unit, env')
+        else undefined
+typeof env (Ref ix) =
+    let (Bind _ status ty) = env `at` ix in
+    case status of
+        Own -> (TRef (Loc 0) Shr ty, borrowShr ix env)
+        Borrow _ _ -> (TRef (Loc 0) Shr ty, env)
+        _ -> undefined
+typeof env (RefMut ix) =
+    let (Bind mu status ty) = env `at` ix in
+    case (mu, status) of
+        (Mut, Own) -> (TRef (Loc 0) Uniq ty, borrowUniq ix env) 
+        _ -> undefined
+typeof env (IfThenElse cond t1 t2) =
+    let (Bool, env') = typeof env cond in
+    let (ty1, env'') = typeof env' t1 in
+    let (ty2, env''') = typeof env' t2 in
+    if ty1 == ty2 && env'' == env'''
+        then (ty1, env'')
+        else undefined
+typeof env (Block seq) = 
+    let (ty, env') = typeofSeq ([] : env) seq in
+    let env'' = endlft env' in
+        (shift ty $ -1, tail env'')
+
+typeofSeq :: Env -> Seq -> (Type, Env)
+typeofSeq env (Let _ t seq) = 
+    let (ty, env') = typeof env t in
+    let env'' = insert Imm ty env' in
+        typeofSeq env'' seq
+typeofSeq env (LetMut _ t seq) = 
+    let (ty, env') = typeof env t in
+    let env'' = insert Mut ty env' in
+        typeofSeq env'' seq
+typeofSeq env (Seq t seq) =
+    let (ty, env') = typeof env t in
+        typeofSeq env' seq
+typeofSeq env (Final t) = typeof env t

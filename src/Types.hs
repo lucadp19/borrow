@@ -1,20 +1,22 @@
 module Types where
-
 data Type
     = Unit
     | Bool
     | Int
     | String
     | TRef Lft RefType Type
+  deriving (Eq)
 
 data Lft
     = Loc Int
     | Ext Int
     | LftVar Int
+  deriving (Eq)
 
 data RefType
     = Uniq
     | Shr
+  deriving (Eq)
 
 shift :: Type -> Int -> Type
 shift (TRef (Loc n) rt ty) m
