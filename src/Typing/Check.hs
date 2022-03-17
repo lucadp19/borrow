@@ -1,9 +1,21 @@
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE LambdaCase #-}
+
 module Typing.Check where
 
+import Prelude hiding ( read )
+
 import Typing.Env
-import Indices ( Ix(..) )
+import Indices ( Ix(..), block )
 import Types ( Type(..), RefType(..), Lft(..), shift )
 import Syntax ( Deref(..), Term(..), Seq(..) )
+
+import Data.Functor ( (<$) )
+import Control.Monad.State.Class ( MonadState(..), gets, modify )
+import Control.Monad.Reader.Class ( MonadReader(..), asks )
+import Control.Monad.Reader ( runReader, Reader )
+import Control.Monad ( when )
+import Control.Monad.Except ( MonadError (throwError, catchError), runExceptT )
 
 copy :: Type -> Bool
 copy Unit = True
@@ -16,99 +28,107 @@ clone :: Type -> Bool
 clone (TRef _ Uniq _) = False
 clone _ = True
 
-deref :: Env -> Deref -> Type
-deref env (Deref 0 ix) =
-    let Bind _ status ty = env `at` ix in
+deref :: MonadReader Env m => Deref -> m Type
+deref (Deref 0 ix) = do
+    Bind _ status ty <- asks (`at` ix)
     case status of
         Moved -> undefined
-        _ -> ty
-deref env (Deref n ix) = 
-    case deref env (Deref (n-1) ix) of
-        TRef _ _ ty -> ty
+        _ -> pure ty
+deref p =
+    deref (decr p) >>= \case
+        TRef _ _ ty -> pure ty
         _ -> undefined
+  where
+    decr :: Deref -> Deref
+    decr (Deref n ix) = Deref (n-1) ix
 
-mut :: Env -> Deref -> Type
-mut env (Deref 0 ix) = 
-    let Bind m s ty = env `at` ix in
-    case (m, s) of
-        (Mut, Own) -> ty
-        (Mut, Moved) -> ty
+mut :: MonadReader Env m => Deref -> m Type
+mut (Deref 0 ix) = do
+    Bind mu status ty <- asks (`at` ix)
+    case (mu, status) of
+        (Mut, Own) -> pure ty
+        (Mut, Moved) -> pure ty
         _ -> undefined
-mut env deref = derefMut env deref
+mut p = derefMut p
 
-derefMut :: Env -> Deref -> Type
-derefMut env (Deref 0 ix) = 
-    let Bind _ status ty = env `at` ix in
+derefMut :: MonadReader Env m => Deref -> m Type
+derefMut (Deref 0 ix) = do
+    Bind _ status ty <- asks (`at` ix)
     case status of
-        Own -> ty
+        Own -> pure ty
         _ -> undefined
-derefMut env (Deref n ix) =
-    case derefMut env (Deref (n-1) ix) of
-        TRef _ Uniq ty -> ty
+derefMut (Deref n ix) =
+    derefMut (Deref (n-1) ix) >>= \case
+        TRef _ Uniq ty -> pure ty
         _ -> undefined
+
+-- TODO: move this
+out :: MonadState s m => m a -> m (a, s)
+out m = do
+    state <- get
+    val <- m
+    pure (val, state)
 
 class Typeable t where
-    typeof :: Env -> t -> (Type, Env)
+    typeof :: MonadState Env m => t -> m Type
 
 instance Typeable Term where
-    typeof env LitUnit = (Unit, env)
-    typeof env (LitInt n) = (Int, env)
-    typeof env LitTrue = (Bool, env)
-    typeof env LitFalse = (Bool, env)
-    typeof env (LitString str) = (String, env)
-    typeof env (Var ix) = 
-        let (Bind _ status ty') = env `at` ix in
-        let (Ix n _) = ix in
-        if copy ty'
+    typeof LitUnit = pure Unit
+    typeof (LitInt n) = pure Int
+    typeof LitTrue = pure Bool
+    typeof LitFalse = pure Bool
+    typeof (LitString str) = pure String
+    typeof (Var ix) = do
+        Bind _ status ty <- gets (`at` ix)
+        let n = block ix
+        if copy ty
             then case status of
-                Own -> (shift ty' n, env)
-                Borrow Shr _ -> (shift ty' n, env)
+                Own -> pure $ shift ty n
+                Borrow Shr _ -> pure $ shift ty n
                 _ -> undefined
             else case status of
-                Own -> (shift ty' n, poison ix env)
+                Own -> shift ty n <$ modify (poison ix)
                 _ -> undefined
-    typeof env (Clone p) = 
-        let ty = deref env p in
-            (ty, env)
-    typeof env (Assign p t) =
-        let ty = mut env p in
-        let (ty', env') = typeof env t in
-        if ty == ty' 
-            then (Unit, env')
+    typeof (Clone p) = gets . runReader $ deref p
+    typeof (Assign p t) = do
+        ty <- gets . runReader $ mut p
+        ty' <- typeof t
+        if ty == ty'
+            then pure Unit
             else undefined
-    typeof env (Ref ix) =
-        let (Bind _ status ty) = env `at` ix in
+    typeof (Ref ix) = do
+        Bind _ status ty <- gets (`at` ix)
         case status of
-            Own -> (TRef (Loc 0) Shr ty, borrowShr ix env)
-            Borrow _ _ -> (TRef (Loc 0) Shr ty, env)
+            Own -> TRef (Loc 0) Shr ty <$ modify (borrowShr ix)
+            Borrow _ _ -> pure $ TRef (Loc 0) Shr ty
             _ -> undefined
-    typeof env (RefMut ix) =
-        let (Bind mu status ty) = env `at` ix in
+    typeof (RefMut ix) = do
+        Bind mu status ty <- gets (`at` ix)
         case (mu, status) of
-            (Mut, Own) -> (TRef (Loc 0) Uniq ty, borrowUniq ix env) 
+            (Mut, Own) -> TRef (Loc 0) Uniq ty <$ modify (borrowUniq ix) 
             _ -> undefined
-    typeof env (IfThenElse cond t1 t2) =
-        let (Bool, env') = typeof env cond in
-        let (ty1, env'') = typeof env' t1 in
-        let (ty2, env''') = typeof env' t2 in
-        if ty1 == ty2 && env'' == env'''
-            then (ty1, env'')
+    typeof (IfThenElse cond t1 t2) = do
+        tyCond <- typeof cond
+        when (tyCond /= Bool) undefined
+        env <- get
+        (ty1, env') <- out $ typeof t1
+        (ty2, env'') <- out $ typeof t2 <* put env
+        if ty1 == ty2 && env' == env''
+            then pure ty1
             else undefined
-    typeof env (Block seq) = 
-        let (ty, env') = typeof ([] : env) seq in
-        let env'' = endlft env' in
-            (shift ty $ -1, tail env'')
+    typeof (Block seq) = do
+        ty <- typeof seq <* modify ([] :)
+        modify $ tail . endlft
+        pure $ shift ty $ -1
 
 instance Typeable Seq where
-    typeof env (Let _ t seq) = 
-        let (ty, env') = typeof env t in
-        let env'' = insert Imm ty env' in
-            typeof env'' seq
-    typeof env (LetMut _ t seq) = 
-        let (ty, env') = typeof env t in
-        let env'' = insert Mut ty env' in
-            typeof env'' seq
-    typeof env (Seq t seq) =
-        let (ty, env') = typeof env t in
-            typeof env' seq
-    typeof env (Final t) = typeof env t
+    typeof (Let _ t seq) = do
+        ty <- typeof t
+        modify $ insert Imm ty
+        typeof seq
+    typeof (LetMut _ t seq) = do
+        ty <- typeof t
+        modify $ insert Mut ty
+        typeof seq
+    typeof (Seq t seq) = typeof t *> typeof seq
+    typeof (Final t) = typeof t

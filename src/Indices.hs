@@ -3,6 +3,12 @@ module Indices where
 data Ix = Ix !Int !Int
     deriving (Eq)
 
+block :: Ix -> Int
+block (Ix n _) = n
+
+offset :: Ix -> Int
+offset (Ix _ n) = n
+
 instance Semigroup Ix where
     (Ix 0 n) <> (Ix b' n') = Ix b' (n + n')
     (Ix b n) <> (Ix b' n') = Ix (b + b') n
