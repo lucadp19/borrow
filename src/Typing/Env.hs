@@ -1,20 +1,20 @@
 module Typing.Env where
 
 import Types ( Type(..), RefType(..) )
-import Indices (Ix(..))
+import Indices (Ix(..), block)
 
 type Env = [Block]
 
 type Block = [Bind]
 
 data Bind = Bind !MutStatus !BorrowStatus !Type
-  deriving (Eq)
+  deriving (Eq, Show)
 
 data MutStatus = Mut | Imm
-  deriving (Eq)
+  deriving (Eq, Show)
 
 data BorrowStatus = Own | Borrow !RefType !Int | Moved
-  deriving (Eq)
+  deriving (Eq, Show)
 
 at :: Env -> Ix -> Bind
 ((bind : _) : env) `at` (Ix 0 0) = bind
@@ -66,7 +66,7 @@ borrow :: RefType -> Ix -> Env -> Env
 borrow refTy ix = updateIx f ix
   where
     depth :: Int
-    depth = let (Ix n _) = ix in depth
+    depth = block ix
 
     f :: Bind -> Bind
     f (Bind mu _ ty) = Bind mu (Borrow refTy $ -depth) ty  

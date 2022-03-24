@@ -29,17 +29,17 @@ empty = Heap
 insert :: Heap v -> v -> (Heap v, Location)
 insert h v = case free h of
     -- free list is empty
-    [] -> let l = Location $ size h in
+    [] -> let l = Location $ (size h) in
         let h' = h { 
               mem = M.insert (size h) v (mem h)
-            , size = size h + 1
+            , size = (size h) + 1
             } in
         (h', l)
     -- free list has at least one element
     f:fs -> let l = Location f in
         let h' = h { 
               mem = M.insert f v (mem h)
-            , size = size h + 1
+            , size = (size h) + 1
             , free = fs
             } in
         (h', l)
@@ -48,8 +48,8 @@ delete :: Heap v -> Location -> Heap v
 delete h (Location l)
     | M.member l (mem h) = h 
         { mem = M.delete l (mem h)
-        , size = size h - 1
-        , free = l : free h
+        , size = (size h) - 1
+        , free = l : (free h)
         }
     | otherwise = h
 
