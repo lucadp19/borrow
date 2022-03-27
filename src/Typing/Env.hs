@@ -20,7 +20,7 @@ at :: Env -> Ix -> Bind
 ((bind : _) : env) `at` (Ix 0 0) = bind
 ((_ : block) : env) `at` (Ix 0 n) = (block : env) `at` Ix 0 (n-1)
 (block : env) `at` (Ix b n) = env `at` Ix (b - 1) n
-_ `at` _ = undefined
+_ `at` _ = undefined 
 
 insert :: MutStatus -> Type -> Env -> Env
 insert mu ty env =

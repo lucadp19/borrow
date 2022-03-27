@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings, LambdaCase #-}
 
 module Types where
 
@@ -24,6 +24,14 @@ data RefType
     = Uniq
     | Shr
   deriving (Eq, Show)
+
+isBaseType :: Type -> Bool
+isBaseType = \case
+    Int -> True
+    Bool -> True
+    Unit -> True
+    String -> True
+    _ -> False
 
 shift :: Type -> Int -> Maybe Type
 shift (TRef (Loc n) rt ty) m

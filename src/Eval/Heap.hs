@@ -1,6 +1,7 @@
 module Eval.Heap 
     ( Location
     , Heap
+    , empty
     , insert
     , delete
     , Eval.Heap.lookup
@@ -29,7 +30,7 @@ empty = Heap
 insert :: Heap v -> v -> (Heap v, Location)
 insert h v = case free h of
     -- free list is empty
-    [] -> let l = Location $ (size h) in
+    [] -> let l = Location (size h) in
         let h' = h { 
               mem = M.insert (size h) v (mem h)
             , size = (size h) + 1

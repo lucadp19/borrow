@@ -43,3 +43,14 @@ termErr = Block $
     Let "x" (LitInt 7) $
     Let "p" (Ref "x" $ Ix 0 0) $
     Final $ Var "p" $ Ix 0 0 
+
+termShift = Block $
+    Let "x" (LitInt 7) $
+    Final $ Block $
+        Let "p" (Ref "x" $ Ix 1 0) $
+        Let "y" LitUnit $
+        Final $ Block $
+            Let "pp" (Ref "p" $ Ix 1 1) $
+            Let "y" LitUnit $
+            Let "x1" (Clone $ Deref 2 $ Ix 0 1) $
+            Final $ Var "x1" $ Ix 0 0
