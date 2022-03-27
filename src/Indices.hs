@@ -25,5 +25,5 @@ ix <+> (Ix b n) = ix <> Ix b (n+1)
 ixSub :: Ix -> Ix -> Maybe Ix
 (Ix n k) `ixSub` (Ix n' k')
     | n > n'             = Just $ Ix (n - n') k
-    | n == n' && k >= k' = Just $ Ix 0 $ k - k'
+    | n == n' && k > k' = Just $ Ix 0 $ k - k' - 1
     | otherwise          = Nothing 

@@ -60,13 +60,15 @@ assign n ix val = do
         Just (totalIx, oldVal) -> case oldVal of
             VPtr loc -> do
                 liftIO $ print $ "total ix: " <> show (toTuple totalIx) 
-                    <> "\nValue: " <> show val
+                    <> " OldValue: " <> show oldVal
+                    <> " Value: " <> show val
                 modify $ fromJust . S.pushTmp loc
                 modify $ fromJust . S.adjust (const $ update totalIx val) totalIx
                 pure $ Just ()
             _ -> do
                 liftIO $ print $ "total ix: " <> show (toTuple totalIx) 
-                    <> "\nValue: " <> show val
+                    <> " OldValue: " <> show oldVal
+                    <> " Value: " <> show val
                 modify $ fromJust . S.adjust (const $ update totalIx val) totalIx
                 pure $ Just ()
   where
@@ -152,6 +154,7 @@ instance Evaluable Term where
     eval (Block seqn) = do
         modify S.pushBlock
         val <- fullEval seqn
+        get >>= \s -> liftIO $ print (S.env s)
         modify $ fromJust . popBlock
         -- decrease block in ref by one!!
         pure . Right $ val
