@@ -16,6 +16,8 @@ import Control.Monad.Except ( MonadError(..) )
 import Control.Monad.IO.Class ( MonadIO(..) )
 import Data.Maybe (fromJust)
 import Data.Functor ( ($>) )
+import Control.Monad.Trans.Maybe ( MaybeT(..) )
+-- import Control.Monad.Trans.Class ( MonadTrans(lift) )
 
 data Value
     = VUnit
@@ -39,43 +41,44 @@ instance Show Value where
 
 data Tmp = Tmp deriving (Show)
 
-clone :: (MonadState (S.State Value) m) => Int -> Ix -> m (Maybe (Either Tmp Value))
+clone :: (MonadState (S.State Value) m, MonadError T.Text m) => Int -> Ix -> m (Either Tmp Value)
 clone n ix = do
-    state <- get
-    case deref n ix (S.env state) of
-        Nothing -> pure Nothing
+    store <- get
+    case deref n ix (S.env store) of
+        Nothing -> throwError $ "cannot dereference the variable at index " <> (T.pack . show . toTuple) ix <> 
+            " for " <> (T.pack . show) n <> " times"
         Just (totalIx, val) -> case val of
-            VPtr loc -> case H.lookup (S.heap state) loc of
-                Just val -> do 
-                    modify $ fromJust . S.heapInsert val
-                    pure . Just . Left $ Tmp
-                Nothing -> pure Nothing
-            VRef ix' -> pure . Just . Right . VRef $ ix' <+> totalIx
-            val -> pure . Just . Right $ val
+            VPtr loc -> do
+                val' <- maybe (throwError "could not find dereferenced value in the heap") pure $ S.heapLookup loc store
+                modify $ fromJust . S.heapInsert val'
+                pure $ Left Tmp
+            VRef ix' -> pure $ Right $ VRef $ ix' <+> totalIx
+            val -> pure $ Right val
 
-assign :: (MonadState (S.State Value) m, MonadIO m) => Int -> Ix -> Value -> m (Maybe ())
+assign :: (MonadState (S.State Value) m, MonadIO m, MonadError T.Text m) => Int -> Ix -> Value -> m ()
 assign n ix val = do
     s <- get
     case deref n ix (S.env s) of
-        Nothing -> pure Nothing
+        Nothing -> throwError $ "cannot dereference the variable at index " <> (T.pack . show . toTuple) ix <> 
+            " for " <> (T.pack . show) n <> " times"
         Just (totalIx, oldVal) -> case oldVal of
             VPtr loc -> do
-                liftIO $ print $ "total ix: " <> show (toTuple totalIx) 
-                    <> " OldValue: " <> show oldVal
-                    <> " Value: " <> show val
-                modify $ fromJust . S.pushTmp loc
-                modify $ fromJust . S.adjust (const $ update totalIx val) totalIx
-                pure $ Just ()
+                -- liftIO $ print $ "total ix: " <> show (toTuple totalIx) 
+                --     <> " OldValue: " <> show oldVal
+                --     <> " Value: " <> show val
+                get >>= \s -> case S.pushTmp loc s of
+                    Nothing -> throwError "unexpected error: cannot insert value in temporary stack"
+                    Just s' -> case val `shiftVal` totalIx of
+                        Nothing -> throwError "unexpected error: cannot update value in environment as it would result in negative indices" 
+                        Just val' -> put $ fromJust $ S.adjust (const val') totalIx s'
             _ -> do
-                liftIO $ print $ "total ix: " <> show (toTuple totalIx) 
-                    <> " OldValue: " <> show oldVal
-                    <> " Value: " <> show val
-                modify $ fromJust . S.adjust (const $ update totalIx val) totalIx
-                pure $ Just ()
+                -- liftIO $ print $ "total ix: " <> show (toTuple totalIx) 
+                --     <> " OldValue: " <> show oldVal
+                --     <> " Value: " <> show val
+                get >>= \s -> case val `shiftVal` totalIx of
+                    Nothing -> throwError "unexpected error: cannot update value in environment as it would result in negative indices" 
+                    Just val' -> put $ fromJust $ S.adjust (const val') totalIx s
   where
-    update :: Ix -> Value -> Value
-    update ix val = fromJust $ shiftVal val ix
-
     shiftVal :: Value -> Ix -> Maybe Value
     shiftVal (VRef ix) off = VRef <$> ix `ixAssignSub` off
     shiftVal v _ = Just v
@@ -107,7 +110,6 @@ deref n ix = go n ix ix
         [] -> Nothing
         b:bs -> go n (Ix (m-1) k) off $ E.Env bs
 
-
 class Evaluable t where
     eval :: forall m. (MonadState (S.State Value) m, MonadError T.Text m, MonadIO m) => t -> m (Either Tmp Value)
 
@@ -132,53 +134,53 @@ instance Evaluable Term where
     -- Variables
     eval (Var _ ix) = do
         get >>= \state -> case state `S.at` ix of
-            Nothing -> throwError "error: no value"
-            Just VMoved -> throwError "error: use of moved value"
+            Nothing -> throwError $ "cannot evaluate variable as there is no value at index " 
+                <> (T.pack . show . toTuple) ix <> " in the environment"
+            Just VMoved -> throwError "error! use of moved value"
             Just (VPtr loc) -> do
-                modify $ fromJust . S.adjust (const VMoved) ix
-                modify $ fromJust . S.pushTmp loc
+                modify $ fromJust . S.adjust (const VMoved) ix -- we know that there is a value at position ix
+                modify $ fromJust . S.pushTmp loc -- there is at least a value, hence at least a block
                 pure $ Left Tmp
-            Just (VRef ix') -> pure . Right . VRef $ ix' <+> ix -- CHECK
+            Just (VRef ix') -> pure . Right . VRef $ ix' <+> ix
             Just val -> pure $ Right val
     -- Clone
-    eval (Clone (Deref n ix)) = clone n ix >>= \case
-        Nothing -> throwError "error!"
-        Just val -> pure val
+    eval (Clone (Deref n ix)) = clone n ix
     -- References
     eval (Ref _ ix) = pure . Right $ VRef ix
     eval (RefMut _ ix) = pure . Right $ VRef ix
     -- Assignment
     eval (Assign (Deref n ix) t) = do
         value <- fullEval t
-        assign n ix value >>= \case
-            Nothing -> throwError "ERROR!"
-            Just () -> pure . Right $ VUnit
+        assign n ix value
+        pure $ Right VUnit
     -- Conditional
     eval (IfThenElse cond t1 t2) = do
         val <- fullEval cond
         case val of
             VBool True -> eval t1
             VBool False -> eval t2
-            _ -> throwError "wrong type"
+            _ -> throwError "condition in if expression must evaluate to either `True` or `False`"
     -- Block
     eval (TBlock block) = eval block
     -- Function abstraction
     eval (Fn _ _ (Block seqn)) = do
-        modify $ fromJust . S.heapInsert (VCode seqn)
-        pure . Left $ Tmp
+        store <- get
+        case S.heapInsert (VCode seqn) store of
+            Nothing -> throwError "unexpected error: cannot insert function closure in heap"
+            Just store' -> put store' $> Left Tmp
     -- Function application
     eval (Appl fn _ terms) = do
         loc <- fullEval fn >>= \case
             VPtr loc -> pure loc
-            _ -> throwError "error" 
-        body <- get >>= \state -> case S.heapLookup loc state of
-            Nothing -> throwError "error"
+            _ -> throwError "function value was not a heap pointer" 
+        body <- get >>= \store -> case S.heapLookup loc store of
+            Nothing -> throwError "error: cannot find location in heap"
             Just (VCode seqn) -> pure seqn
-            Just _ -> throwError "error"
+            Just _ -> throwError "error: expected fuction closure"
         args <- shiftVals <$> evalArgs terms
         modify $ S.pushBlockWithArgs args
         res <- fullEval body >>= unshift
-        modify $ fromJust . S.popBlock
+        modify $ fromJust . popBlock -- safe as we put a new block just before
         case res of
             VPtr loc -> do
                 modify $ fromJust . S.pushTmp loc
@@ -201,19 +203,20 @@ instance Evaluable Term where
         unshift :: Value -> m Value
         unshift = \case
             VRef (Ix n k) -> if n > 0 
-                then pure $ VRef (Ix (n-1) k)
-                else throwError "error"
+                then pure . VRef $ Ix (n-1) k
+                else throwError "error: could not return value as it did not live long enough"
             v -> pure v
 
 instance Evaluable Block where
     eval (Block seqn) = do
         modify S.pushBlock
         val <- fullEval seqn
-        get >>= \s -> liftIO $ print (S.env s)
+        -- get >>= \s -> liftIO $ print (S.env s)
         modify $ fromJust . popBlock
         val' <- case val of
-            VRef (Ix n k) -> if n > 0 then pure . VRef $ Ix (n-1) k
-                else throwError "error"
+            VRef (Ix n k) -> if n > 0 
+                then pure . VRef $ Ix (n-1) k
+                else throwError "error: could not return value as it did not live long enough"
             _ -> pure val
         pure . Right $ val'
 
@@ -233,9 +236,8 @@ instance Evaluable Seq where
 popBlock :: S.State Value -> Maybe (S.State Value)
 popBlock s = case (S.tmp s, S.env s) of
     (tmpBlock : tmp', E.Env (E.Block envBlock : env')) -> 
-        let heap' = batchDelete (S.heap s) tmpBlock 
-            heap'' = batchDelete heap' $ getPtrs envBlock in
-        Just $ s { S.tmp = tmp', S.env = E.Env env', S.heap = heap'' }
+        let heap' = batchDelete (S.heap s) $ tmpBlock <> getPtrs envBlock in
+        Just $ s { S.tmp = tmp', S.env = E.Env env', S.heap = heap' }
     _ -> Nothing
   where
     batchDelete :: H.Heap a -> [H.Location] -> H.Heap a 

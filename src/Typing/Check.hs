@@ -103,20 +103,14 @@ instance Typeable Term where
         let n = block ix
         if copy ty
             then case status of
-                Own -> case shift ty n of
-                    Nothing -> throwError "unreachable lifetime error"
-                    Just ty' -> pure ty'
-                Borrow Shr _ -> case shift ty n of
-                    Nothing -> throwError "unreachable lifetime error"
-                    Just ty' -> pure ty'
+                Own -> pure . fromJust $ shift ty n -- n >= 0 implies that the result is a Just
+                Borrow Shr _ -> pure . fromJust $ shift ty n -- n >= 0 implies that the result is a Just
                 Borrow Uniq _ -> throwError $ "cannot use variable `" <> name <> "` as it is currently mutably borrowed"
                 Moved -> throwError $ "cannot use variable `" <> name <> "` as it is has already been moved"
             else case status of
                 Own -> do
-                    maybeModify (poison ix) $ invalidIxErr ix
-                    case shift ty n of
-                        Nothing -> throwError "unreachable lifetime error"
-                        Just ty' -> pure ty'
+                    modify $ fromJust . poison ix   -- ix is in the environment as we've read it above
+                    pure . fromJust $ shift ty n    -- n >= 0 implies that the result is a Just
                 Borrow _ _ -> throwError $ "cannot use variable `" <> name <> "`as it is currently borrowed"
                 Moved -> throwError $ "cannot use variable `" <> name <> "` as it has already been moved"
     -- Clones
@@ -134,7 +128,7 @@ instance Typeable Term where
             Just val -> pure val
             Nothing -> throwError $ invalidIxErr ix
         case status of
-            Own -> TRef (Loc 0) Shr ty <$ maybeModify (borrowShr ix) (invalidIxErr ix)
+            Own -> TRef (Loc 0) Shr ty <$ modify (fromJust . borrowShr ix) -- ix is in the environment as we have just read it
             Borrow Shr _ -> pure $ TRef (Loc 0) Shr ty
             Borrow Uniq _ -> throwError $ "cannot create shared reference to `" <> name <> "` as it is currently mutably borrowed"
             Moved -> throwError $ "cannot create shared reference to `" <> name <> "` as it has been moved"
@@ -144,11 +138,11 @@ instance Typeable Term where
             Just val -> pure val
             Nothing -> throwError $ invalidIxErr ix
         case (mu, status) of
-            (Mut, Own) -> TRef (Loc 0) Uniq ty <$ maybeModify (borrowUniq ix) (invalidIxErr ix)
+            (Mut, Own) -> TRef (Loc 0) Uniq ty <$ modify (fromJust . borrowShr ix) -- ix is in the environment as we have just read it
             (Mut, Borrow _ _) -> throwError $ "cannot create mutable reference to `" <> name <> "` as it is already borrowed"
             (Mut, Moved) -> throwError $ "cannot create mutable reference to `" <> name <> "` as it has already been moved"
             (Imm, _) -> throwError $ "cannot create mutable reference to `" <> name <> "`as it has not been declared as `mut`" 
-    -- If
+    -- Conditional expression
     typeof (IfThenElse cond t1 t2) = do
         tyCond <- typeof cond
         when (tyCond /= Bool) $ throwError $ "type mismatch: expected `bool` but got `" <> prettyType tyCond <> "`"
@@ -164,9 +158,9 @@ instance Typeable Term where
     typeof (Fn n (params, outTy) (Block body)) = do
         wf n $ TFn n params outTy -- checking that the type is valid
         env <- get
-        let fnEnv = fromJust $ buildEnv (E.Env [E.Block []]) params
+        let fnEnv = E.pushBlockWithArgs ((\ty -> Bind Imm Own ty) <$> params) mempty
         ty <- put fnEnv *> typeof body >>= \res -> case shift res (-1) of
-            Nothing -> throwError "cannot return value as it does not live long enough"
+            Nothing -> throwError "cannot return value from function as it does not live long enough"
             Just ty -> pure ty
         if ty <: outTy
             then TFn n params outTy <$ put env
@@ -179,10 +173,6 @@ instance Typeable Term where
                 else throwError "function argument contains an unspecified generic lifetime"
         wf n (TRef {}) = throwError "function argument contains a non-generic lifetime"
         wf _ (TFn n' params' outTy') = mapM (wf n') params' *> wf n' outTy'
-
-        buildEnv :: TEnv -> [Type] -> Maybe TEnv
-        buildEnv env [] = pure env
-        buildEnv env (ty:tys) = insert Imm (fromJust $ shift ty 1) env >>= \env' -> buildEnv env' tys
     -- Function application
     typeof (Appl fn lfts terms) = typeof fn >>= \case
         -- fn has function type
@@ -226,13 +216,6 @@ instance Typeable Seq where
         typeof seqn
     typeof (Seq t seqn) = typeof t *> typeof seqn
     typeof (Final t) = typeof t
-
-maybeModify :: (MonadError e m, MonadState s m) => (s -> Maybe s) -> e -> m ()
-maybeModify f err = do
-    env <- get
-    case f env of
-        Nothing -> throwError err
-        Just env' -> put env' *> pure ()
 
 invalidIxErr :: Ix -> T.Text
 invalidIxErr ix = "invalid index: no value at position " <> (fromString . show . toTuple) ix
