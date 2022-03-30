@@ -1,15 +1,16 @@
 {-# LANGUAGE LambdaCase, OverloadedStrings #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE ScopedTypeVariables, InstanceSigs #-}
 
 module Eval.Eval where
 
 import qualified Eval.State as S
 
 import qualified Env as E
-import Indices ( Ix(..), toTuple, (<+>), ixSub)
+import Indices ( Ix(..), toTuple, (<+>))
 import qualified Eval.Heap as H
 import qualified Data.Text as T
-import Syntax (Term(..), Seq(..), Deref(..))
+import Syntax (Term(..), Seq(..), Deref(..), Block(..) )
 import Control.Monad.State.Class ( MonadState(..), modify )
 import Control.Monad.Except ( MonadError(..) )
 import Control.Monad.IO.Class ( MonadIO(..) )
@@ -23,7 +24,7 @@ data Value
     | VRef Ix
     | VPtr H.Location
     | VString T.Text
-    | VCode Term
+    | VCode Seq
     | VMoved
 
 instance Show Value where
@@ -76,8 +77,16 @@ assign n ix val = do
     update ix val = fromJust $ shiftVal val ix
 
     shiftVal :: Value -> Ix -> Maybe Value
-    shiftVal (VRef ix) off = VRef <$> ix `ixSub` off
+    shiftVal (VRef ix) off = VRef <$> ix `ixAssignSub` off
     shiftVal v _ = Just v
+
+    ixAssignSub :: Ix -> Ix -> Maybe Ix
+    (Ix n k) `ixAssignSub` (Ix n' k')
+        | n > n'            = Just $ Ix (n - n') k
+        | n == n' && n > 0  = Just $ Ix n k
+        | n == n' && n == 0 && k > k'  
+                            = Just $ Ix 0 $ k - k' - 1
+        | otherwise         = Nothing 
 
 deref :: Int -> Ix -> E.Env Value -> Maybe (Ix, Value)
 deref n ix = go n ix ix
@@ -100,7 +109,7 @@ deref n ix = go n ix ix
 
 
 class Evaluable t where
-    eval :: (MonadState (S.State Value) m, MonadError T.Text m, MonadIO m) => t -> m (Either Tmp Value)
+    eval :: forall m. (MonadState (S.State Value) m, MonadError T.Text m, MonadIO m) => t -> m (Either Tmp Value)
 
 fullEval :: (Evaluable t, MonadState (S.State Value) m, MonadError T.Text m, MonadIO m) => t -> m Value
 fullEval t = eval t >>= \case
@@ -110,6 +119,7 @@ fullEval t = eval t >>= \case
     Right val -> pure val
 
 instance Evaluable Term where
+    eval :: forall m. (MonadState (S.State Value) m, MonadError T.Text m, MonadIO m) => Term -> m (Either Tmp Value)
     -- Base values
     eval LitUnit = pure $ Right VUnit
     eval (LitInt n) = pure $ Right $ VInt n
@@ -151,14 +161,61 @@ instance Evaluable Term where
             VBool False -> eval t2
             _ -> throwError "wrong type"
     -- Block
+    eval (TBlock block) = eval block
+    -- Function abstraction
+    eval (Fn _ _ (Block seqn)) = do
+        modify $ fromJust . S.heapInsert (VCode seqn)
+        pure . Left $ Tmp
+    -- Function application
+    eval (Appl fn _ terms) = do
+        loc <- fullEval fn >>= \case
+            VPtr loc -> pure loc
+            _ -> throwError "error" 
+        body <- get >>= \state -> case S.heapLookup loc state of
+            Nothing -> throwError "error"
+            Just (VCode seqn) -> pure seqn
+            Just _ -> throwError "error"
+        args <- shiftVals <$> evalArgs terms
+        modify $ S.pushBlockWithArgs args
+        res <- fullEval body >>= unshift
+        modify $ fromJust . S.popBlock
+        case res of
+            VPtr loc -> do
+                modify $ fromJust . S.pushTmp loc
+                pure . Left $ Tmp
+            v -> pure . Right $ v
+      where
+        evalArgs :: [Term] -> m [Value]
+        evalArgs [] = pure []
+        evalArgs (t:ts) = do
+            v <- fullEval t
+            vs <- evalArgs ts
+            pure $ v:vs
+
+        shiftVals :: [Value] -> [Value]
+        shiftVals [] = []
+        shiftVals (v:vs) = case v of
+            VRef ix -> VRef (ix <> Ix 1 0) : shiftVals vs
+            v -> v : shiftVals vs
+
+        unshift :: Value -> m Value
+        unshift = \case
+            VRef (Ix n k) -> if n > 0 
+                then pure $ VRef (Ix (n-1) k)
+                else throwError "error"
+            v -> pure v
+
+instance Evaluable Block where
     eval (Block seqn) = do
         modify S.pushBlock
         val <- fullEval seqn
         get >>= \s -> liftIO $ print (S.env s)
         modify $ fromJust . popBlock
-        -- decrease block in ref by one!!
-        pure . Right $ val
-    eval _ = undefined
+        val' <- case val of
+            VRef (Ix n k) -> if n > 0 then pure . VRef $ Ix (n-1) k
+                else throwError "error"
+            _ -> pure val
+        pure . Right $ val'
 
 instance Evaluable Seq where
     eval = \case

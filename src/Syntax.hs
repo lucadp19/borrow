@@ -20,11 +20,13 @@ data Term
     | Var T.Text Ix
     | Clone Deref
     | Assign Deref Term
-    | Block Seq
+    | TBlock Block
     | Ref T.Text Ix
     | RefMut T.Text Ix
-    | Fn Int ([Type], Type) Term
+    | Fn Int ([Type], Type) Block
     | Appl Term [Lft] [Term]
+
+newtype Block = Block Seq
 
 data Deref
     = Deref !Int !Ix

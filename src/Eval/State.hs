@@ -35,6 +35,9 @@ heapInsert val state =
     let (heap', l) = H.insert (heap state) val 
         state' = state { heap = heap' }
     in pushTmp l state'
+
+heapLookup :: H.Location -> State a -> Maybe a
+heapLookup loc state = H.lookup (heap state) loc
     
 at :: State a -> Ix -> Maybe a
 at state = E.at (env state)
@@ -44,3 +47,11 @@ adjust f ix state = E.adjust f ix (env state) >>= \env' -> Just $ state { env = 
 
 pushBlock :: State a -> State a
 pushBlock s = s { tmp = [] : tmp s, env = E.pushBlock (env s) }
+
+pushBlockWithArgs :: [a] -> State a -> State a
+pushBlockWithArgs args s = s { tmp = [] : tmp s, env = E.pushBlockWithArgs args (env s) }
+
+popBlock :: State a -> Maybe (State a)
+popBlock s = case tmp s of
+    [] -> Nothing
+    t:ts -> E.popBlock (env s) >>= \env' -> Just $ s { tmp = ts, env = env s } -- TODO: remove t from heap

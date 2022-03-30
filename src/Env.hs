@@ -81,6 +81,9 @@ adjust f ix (Env env) = Env <$> go env ix
 pushBlock :: Env a -> Env a
 pushBlock (Env env) = Env $ mempty : env
 
+pushBlockWithArgs :: [a] -> Env a -> Env a
+pushBlockWithArgs args (Env env) = Env $ Block args : env
+
 popBlock :: Env a -> Maybe (Env a)
 popBlock (Env env) = case env of
     [] -> Nothing

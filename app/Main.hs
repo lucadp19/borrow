@@ -19,8 +19,8 @@ import Data.Bifunctor (second)
 
 main :: IO ()
 main = do
-    mapM_ prt (termShift : termShift2 : termAssign : termAssign2 : termAssign3 : terms) 
-    mapM_ pre [termShift, termShift2, term1, term2, term3, termAssign, termAssign2, termAssign3 ]
+    mapM_ prt (termShift : termShift2 : termAssign : termAssign2 : termAssign3 : termAssign4 : terms) 
+    mapM_ pre [termShift, termShift2, term1, term2, term3, term4, termAssign, termAssign2, termAssign3, termAssign4 ]
   where
     prt :: Term -> IO ()
     prt = print <=< runCheck . typeof
@@ -44,54 +44,54 @@ terms =
     , term4
     ]
 
-term1 = Block $
+term1 = TBlock $ Block $
     Let "x" (LitInt 4) $
     Let "y" (LitInt 5) $
     Final $ IfThenElse LitTrue (Var "y" $ Ix 0 0) (Var "x" $ Ix 0 1)
 
-term2 = Block $
+term2 = TBlock $ Block $
     LetMut "x" (LitInt 4) $
     Let "y" (LitInt 5) $
     Seq (Assign (Deref 0 (Ix 0 1)) (LitInt 7)) $
     Let "s" (LitString "string") $
     Final $ Var "x" $ Ix 0 2
 
-term3 = Block $
+term3 = TBlock $ Block $
     Let "x" (LitInt 5) $
     Let "p" (Ref "x" $ Ix 0 0) $
     Let "pp" (Ref "p" $ Ix 0 0) $
     Let "x1" (Clone $ Deref 2 $ Ix 0 0) $
     Final $ Var "x1" $ Ix 0 0
 
-term4 = Block $
-    Let "f" (Fn 0 ([Int, Int], Int) $ IfThenElse LitTrue (Var "x" $ Ix 0 0) (Var "y" $ Ix 0 0)) $
+term4 = TBlock $ Block $
+    Let "f" (Fn 0 ([Int, Int], Int) $ Block $ Final $ IfThenElse LitTrue (Var "x" $ Ix 0 0) (Var "y" $ Ix 0 0)) $
     LetMut "x" (LitInt 7) $
     Let "res" (Appl (Var "f" $ Ix 0 1) [] [LitInt 4, Var "x" $ Ix 0 0]) $
     Seq (Assign (Deref 0 $ Ix 0 1) (LitInt 0)) $
     Final LitTrue
 
-termErr = Block $
+termErr = TBlock $ Block $
     Let "x" (LitInt 7) $
     Let "p" (Ref "x" $ Ix 0 0) $
     Final $ Var "p" $ Ix 0 0 
 
-termShift = Block $
+termShift = TBlock $ Block $
     Let "x" (LitInt 7) $
-    Final $ Block $
+    Final $ TBlock $ Block $
         Let "p" (Ref "x" $ Ix 1 0) $
         Let "y" LitUnit $
-        Final $ Block $
+        Final $ TBlock $ Block $
             Let "pp" (Ref "p" $ Ix 1 1) $
             Let "y" LitUnit $
             Let "x1" (Clone $ Deref 2 $ Ix 0 1) $
             Final $ Var "x1" $ Ix 0 0
 
-termShift2 = Block $
+termShift2 = TBlock $ Block $
     Let "x" (LitInt 15) $
-    Final $ Block $
+    Final $ TBlock $ Block $
         Let "p" (Ref "x" $ Ix 1 0) $
         Let "y" LitUnit $
-        Final $ Block $
+        Final $ TBlock $ Block $
             Let "pp" (Ref "p" $ Ix 1 1) $
             Let "y" LitUnit $
             Let "p1" (Clone $ Deref 1 $ Ix 0 1) $
@@ -101,12 +101,12 @@ termShift2 = Block $
             Final $ Var "y" $ Ix 0 0
 
 termAssign :: Term
-termAssign = Block $
+termAssign = TBlock $ Block $
     LetMut "x" (LitInt 15) $
-    Final $ Block $
+    Final $ TBlock $ Block $
         LetMut "p" (RefMut "x" $ Ix 1 0) $
         LetMut "y" LitUnit $
-        Final $ Block $
+        Final $ TBlock $ Block $
             LetMut "pp" (RefMut "p" $ Ix 1 1) $
             LetMut "y" LitUnit $
             LetMut "y" LitUnit $
@@ -115,13 +115,13 @@ termAssign = Block $
             Final $ Var "x_copy" $ Ix 0 0
 
 termAssign2 :: Term
-termAssign2 = Block $
+termAssign2 = TBlock $ Block $
     LetMut "x" (LitInt 15) $
     LetMut "y" (LitInt 140) $
-    Final $ Block $
+    Final $ TBlock $ Block $
         LetMut "p" (RefMut "x" $ Ix 1 1) $
         LetMut "tmp" LitUnit $
-        Final $ Block $
+        Final $ TBlock $ Block $
             LetMut "pp" (RefMut "p" $ Ix 1 1) $
             LetMut "tmp" LitUnit $
             Seq (Assign (Deref 1 $ Ix 0 1) (RefMut "y" $ Ix 2 0)) $
@@ -131,7 +131,7 @@ termAssign2 = Block $
             Final $ Var "y_copy" $ Ix 0 0
 
 termAssign3 :: Term
-termAssign3 = Block $
+termAssign3 = TBlock $ Block $
     LetMut "x" (LitInt 15) $
     Let "" LitUnit $
     LetMut "y" (LitInt 140) $
@@ -143,3 +143,15 @@ termAssign3 = Block $
     Seq (Assign (Deref 2 $ Ix 0 0) $ LitInt 12) $
     Let "y-copy" (Clone $ Deref 2 $ Ix 0 0) $
     Final $ Var "y-copy" $ Ix 0 0
+
+termAssign4 :: Term
+termAssign4 = TBlock $ Block $
+    Let "a" (LitInt 3) $
+    Let "" LitUnit $
+    LetMut "b" (LitInt 15) $
+    Let "" LitUnit $
+    LetMut "p" (Ref "a" $ Ix 0 3) $
+    Let "" LitUnit $
+    Seq (Assign (Deref 0 $ Ix 0 1) $ Ref "b" $ Ix 0 3) $
+    Let "b-copy" (Clone $ Deref 1 $ Ix 0 1) $
+    Final $ Var "b-copy" $ Ix 0 0

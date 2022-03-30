@@ -12,7 +12,7 @@ import Typing.BetterEnv
 import qualified Env as E
 import Indices ( Ix(..), block, toTuple )
 import Types ( Type(..), RefType(..), Lft(..), shift, (<:), prettyType, isBaseType )
-import Syntax ( Deref(..), Term(..), Seq(..) )
+import Syntax ( Deref(..), Term(..), Seq(..), Block(..) )
 
 import qualified Data.Text as T
 import Data.Maybe ( fromJust )
@@ -159,18 +159,15 @@ instance Typeable Term where
             then pure ty1
             else throwError "types and environment of if branches must be equal"
     -- Block
-    typeof (Block seqn) = do
-        ty <- modify pushBlock *> typeof seqn
-        modify $ fromJust . E.popBlock . endlft
-        case shift ty (-1) of
-            Just ty' -> pure ty'
-            Nothing -> throwError "cannot return value as it does not live long enough"
+    typeof (TBlock block) = typeof block
     -- Function abstraction
-    typeof (Fn n (params, outTy) body) = do
+    typeof (Fn n (params, outTy) (Block body)) = do
         wf n $ TFn n params outTy -- checking that the type is valid
         env <- get
         let fnEnv = fromJust $ buildEnv (E.Env [E.Block []]) params
-        ty <- put fnEnv *> typeof body
+        ty <- put fnEnv *> typeof body >>= \res -> case shift res (-1) of
+            Nothing -> throwError "cannot return value as it does not live long enough"
+            Just ty -> pure ty
         if ty <: outTy
             then TFn n params outTy <$ put env
             else throwError $ "type mismatch: expected `" <> prettyType outTy <> "` but got `" <> prettyType ty <> "`"
@@ -185,7 +182,7 @@ instance Typeable Term where
 
         buildEnv :: TEnv -> [Type] -> Maybe TEnv
         buildEnv env [] = pure env
-        buildEnv env (ty:tys) = insert Imm ty env >>= \env' -> buildEnv env' tys
+        buildEnv env (ty:tys) = insert Imm (fromJust $ shift ty 1) env >>= \env' -> buildEnv env' tys
     -- Function application
     typeof (Appl fn lfts terms) = typeof fn >>= \case
         -- fn has function type
@@ -209,6 +206,14 @@ instance Typeable Term where
         subst list = \case
             TRef (LftVar 0 k) ref ty -> TRef (list !! k) ref $ subst list ty
             ty -> ty 
+
+instance Typeable Block where
+    typeof (Block seqn) = do
+        ty <- modify pushBlock *> typeof seqn
+        modify $ fromJust . E.popBlock . endlft
+        case shift ty (-1) of
+            Just ty' -> pure ty'
+            Nothing -> throwError "cannot return value as it does not live long enough" 
 
 instance Typeable Seq where
     typeof (Let _ t seqn) = do
