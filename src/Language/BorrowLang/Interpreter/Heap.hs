@@ -4,6 +4,7 @@ module Language.BorrowLang.Interpreter.Heap
     , empty
     , insert
     , delete
+    , deleteMultiple
     , lookup
     ) where
 
@@ -21,14 +22,19 @@ import qualified Data.IntMap.Strict as M
 
 import qualified Data.Text as T
 
+-- | A heap of values of a given type.
+--
+-- It supports insertions, lookup of values, removals and updates.
 data Heap v = Heap
-    { mem :: IntMap v
-    , size :: !Int
-    , free :: [Int]
+    { mem :: IntMap v -- ^ The inner heap, corresponding to an IntMap of the given values.
+    , size :: !Int    -- ^ The number of elements currently stored.
+    , free :: [Int]   -- ^ A free list, containing the indices of the free blocks.
     } 
 
+-- | A location in a heap.
 newtype Location = Location Int
 
+-- | The empty heap.
 empty :: Heap v
 empty = Heap 
     { mem = M.empty
@@ -36,8 +42,11 @@ empty = Heap
     , free = []
     }
 
-insert :: Heap v -> v -> (Heap v, Location)
-insert h v = case free h of
+-- | Inserts a value into a heap, returning the modified heap and the location of the newly inserted value.
+insert :: v                     -- ^ The value to be inserted.
+       -> Heap v                -- ^ The given heap.
+       -> (Heap v, Location)
+insert v h = case free h of
     -- free list is empty
     [] -> let l = Location (size h) in
         let h' = h { 
@@ -54,8 +63,11 @@ insert h v = case free h of
             } in
         (h', l)
 
-delete :: Heap v -> Location -> Heap v
-delete h (Location l)
+-- | Deletes the value at a location from the heap. If the location is free, no changes are made.
+delete :: Location  -- ^ The location to delete.
+       -> Heap v    -- ^ The given heap.
+       -> Heap v
+delete (Location l) h
     | M.member l (mem h) = h 
         { mem = M.delete l (mem h)
         , size = (size h) - 1
@@ -63,7 +75,17 @@ delete h (Location l)
         }
     | otherwise = h
 
-lookup :: Heap v -> Location -> Maybe v
+-- | Deletes all the given locations from the heap, ignoring free locations.
+deleteMultiple :: [Location]    -- ^ The locations to delete.
+               -> Heap v        -- ^ The given heap.
+               -> Heap v
+deleteMultiple [] h = h
+deleteMultiple (l:ls) h = deleteMultiple ls $ delete l h
+
+-- | Gets the value at a given position on the heap, if any.
+lookup :: Heap v        -- ^ The given heap.
+       -> Location      -- ^ The given position.
+       -> Maybe v
 lookup h (Location l) = M.lookup l (mem h)
 
 adjust :: (v -> v) -> Location -> Heap v -> Heap v

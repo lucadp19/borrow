@@ -45,7 +45,7 @@ adjust f ix store = store { env = E.adjust f ix (env store) }
 
 heapInsert :: a -> Store a -> Maybe (Store a)
 heapInsert val store = 
-    let (heap', l) = H.insert (heap store) val 
+    let (heap', l) = H.insert val (heap store)
         store' = store { heap = heap' }
     in pushTmp l store'
 

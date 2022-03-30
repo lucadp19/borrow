@@ -19,6 +19,7 @@ import Control.Monad.IO.Class ( MonadIO(..) )
 import qualified Data.Text as T
 import Data.Maybe ( fromJust )
 import Data.Functor ( ($>) )
+
 data Tmp = Tmp deriving (Show)
 
 clone :: (MonadState (S.Store Value) m, MonadError T.Text m) => Int -> Ix -> m (Either Tmp Value)
@@ -160,7 +161,7 @@ instance Evaluable Term where
         args <- shiftVals <$> evalArgs terms
         modify $ S.pushBlockWithArgs args
         res <- fullEval body >>= unshift
-        modify $ fromJust . popBlock -- safe as we put a new block just before
+        modify $ fromJust . S.popBlock cleanHeap -- safe as we put a new block just before
         case res of
             VPtr loc -> do
                 modify $ fromJust . S.pushTmp loc
@@ -192,7 +193,7 @@ instance Evaluable Block where
         modify S.pushBlock
         val <- fullEval seqn
         -- get >>= \s -> liftIO $ print (S.env s)
-        modify $ fromJust . popBlock
+        modify $ fromJust . S.popBlock cleanHeap
         val' <- case val of
             VRef (Ix n k) -> if n > 0 
                 then pure . VRef $ Ix (n-1) k
@@ -213,18 +214,12 @@ instance Evaluable Seq where
         Seq t seqn -> eval t *> eval seqn
         Final t -> eval t
 
-popBlock :: S.Store Value -> Maybe (S.Store Value)
-popBlock s = case (S.tmp s, S.env s) of
-    (tmpBlock : tmp', envBlock : env') -> 
-        let heap' = batchDelete (S.heap s) $ tmpBlock <> getPtrs envBlock in
-        Just $ s { S.tmp = tmp', S.env = env', S.heap = heap' }
-    _ -> Nothing
+-- | Removes from the heap all the locations contained in the first two lists,
+-- either as pure locations or as contents of a @VPtr@ value.
+cleanHeap :: [H.Location] -> [Value] -> H.Heap a -> H.Heap a
+cleanHeap locs vals = H.deleteMultiple (locs <> getLocations vals)
   where
-    batchDelete :: H.Heap a -> [H.Location] -> H.Heap a 
-    batchDelete h [] = h
-    batchDelete h (l:ls) = batchDelete (H.delete h l) ls
-
-    getPtrs :: [Value] -> [H.Location]
-    getPtrs [] = []
-    getPtrs (VPtr l:vs) = l : getPtrs vs
-    getPtrs (v:vs) = getPtrs vs
+    getLocations :: [Value] -> [H.Location]
+    getLocations [] = []
+    getLocations (VPtr l:vs) = l : getLocations vs
+    getLocations (v:vs) = getLocations vs
