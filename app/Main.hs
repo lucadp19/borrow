@@ -2,17 +2,25 @@
 
 module Main where
 
-import Typing.Check (typeof)
-import Typing.BetterEnv (TEnv)
+import Language.BorrowLang.Typing.Check ( typeof )
+import Language.BorrowLang.Typing.TypeEnv ( TEnv )
+
 import Control.Monad ( (<=<) ) 
 import Control.Monad.State.Lazy ( runStateT, StateT, join )
 import Control.Monad.Except (ExceptT, runExceptT)
-import Types
-import Syntax
-import Indices ( Ix(..) )
 
-import qualified Eval.State as S
-import Eval.Eval ( Value, eval, fullEval )
+import Language.BorrowLang.Types ( Type(..), RefType(..), Lft(..) )
+import Language.BorrowLang.Syntax
+    ( Block(..)
+    , Seq(..)
+    , Term(..)
+    , Deref(..) 
+    )
+import Language.BorrowLang.Indices ( Ix(..) )
+
+import qualified Language.BorrowLang.Interpreter.Store as S
+import Language.BorrowLang.Interpreter.Eval ( Evaluable(..), fullEval )
+import Language.BorrowLang.Interpreter.Values ( Value(..) )
 
 import Data.Text as T
 import Data.Bifunctor (second)
@@ -48,7 +56,7 @@ runCheck s = runExceptT (runStateT s mempty) >>= \case
     Left err -> pure $ Left err
     Right (ty, env) -> pure $ Right ty
 
-runEval :: StateT (S.State Value) (ExceptT T.Text IO) Value -> IO (Either T.Text Value)
+runEval :: StateT (S.Store Value) (ExceptT T.Text IO) Value -> IO (Either T.Text Value)
 runEval s = runExceptT (runStateT s S.empty) >>= \case
     Left err -> pure $ Left err
     Right (ty, env) -> pure $ Right ty

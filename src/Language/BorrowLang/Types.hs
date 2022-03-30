@@ -1,10 +1,11 @@
 {-# LANGUAGE OverloadedStrings, LambdaCase #-}
 
-module Types where
+module Language.BorrowLang.Types where
 
 import Data.String ( IsString(..) )
 import Data.List ( intercalate )
-import Indices ( Ix )
+
+import Language.BorrowLang.Indices ( Ix )
 
 data Type
     = Unit

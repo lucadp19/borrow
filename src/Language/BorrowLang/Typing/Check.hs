@@ -3,16 +3,16 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables, InstanceSigs #-}
 
-module Typing.Check where
+module Language.BorrowLang.Typing.Check where
 
 import Prelude hiding ( read )
 
--- import Typing.Env
-import Typing.BetterEnv
-import qualified Env as E
-import Indices ( Ix(..), block, toTuple )
-import Types ( Type(..), RefType(..), Lft(..), shift, (<:), prettyType, isBaseType )
-import Syntax ( Deref(..), Term(..), Seq(..), Block(..) )
+import Language.BorrowLang.Typing.TypeEnv
+import qualified Language.BorrowLang.Env as E
+
+import Language.BorrowLang.Indices ( Ix(..), block, toTuple )
+import Language.BorrowLang.Types ( Type(..), RefType(..), Lft(..), shift, (<:), prettyType )
+import Language.BorrowLang.Syntax ( Deref(..), Term(..), Seq(..), Block(..) )
 
 import qualified Data.Text as T
 import Data.Maybe ( fromJust )
@@ -21,10 +21,9 @@ import Data.String ( IsString(..) )
 import Control.Monad.State.Class ( MonadState(..), gets, modify )
 import Control.Monad.Reader.Class ( MonadReader(..), asks )
 import Control.Monad.Reader ( runReader, ReaderT (runReaderT) )
-import Control.Monad ( when, unless, (>=>) )
+import Control.Monad ( when, unless )
 import Control.Monad.IO.Class ( MonadIO(..) )
-import Control.Monad.Except ( MonadError (throwError, catchError), runExcept )
-import Env (pushBlock)
+import Control.Monad.Except ( MonadError(throwError) )
 
 copy :: Type -> Bool
 copy Unit = True
@@ -109,7 +108,7 @@ instance Typeable Term where
                 Moved -> throwError $ "cannot use variable `" <> name <> "` as it is has already been moved"
             else case status of
                 Own -> do
-                    modify $ fromJust . poison ix   -- ix is in the environment as we've read it above
+                    modify $ poison ix
                     pure . fromJust $ shift ty n    -- n >= 0 implies that the result is a Just
                 Borrow _ _ -> throwError $ "cannot use variable `" <> name <> "`as it is currently borrowed"
                 Moved -> throwError $ "cannot use variable `" <> name <> "` as it has already been moved"
@@ -128,7 +127,7 @@ instance Typeable Term where
             Just val -> pure val
             Nothing -> throwError $ invalidIxErr ix
         case status of
-            Own -> TRef (Loc 0) Shr ty <$ modify (fromJust . borrowShr ix) -- ix is in the environment as we have just read it
+            Own -> TRef (Loc 0) Shr ty <$ modify (borrowShr ix)
             Borrow Shr _ -> pure $ TRef (Loc 0) Shr ty
             Borrow Uniq _ -> throwError $ "cannot create shared reference to `" <> name <> "` as it is currently mutably borrowed"
             Moved -> throwError $ "cannot create shared reference to `" <> name <> "` as it has been moved"
@@ -138,7 +137,7 @@ instance Typeable Term where
             Just val -> pure val
             Nothing -> throwError $ invalidIxErr ix
         case (mu, status) of
-            (Mut, Own) -> TRef (Loc 0) Uniq ty <$ modify (fromJust . borrowShr ix) -- ix is in the environment as we have just read it
+            (Mut, Own) -> TRef (Loc 0) Uniq ty <$ modify (borrowShr ix)
             (Mut, Borrow _ _) -> throwError $ "cannot create mutable reference to `" <> name <> "` as it is already borrowed"
             (Mut, Moved) -> throwError $ "cannot create mutable reference to `" <> name <> "` as it has already been moved"
             (Imm, _) -> throwError $ "cannot create mutable reference to `" <> name <> "`as it has not been declared as `mut`" 
@@ -167,7 +166,10 @@ instance Typeable Term where
             else throwError $ "type mismatch: expected `" <> prettyType outTy <> "` but got `" <> prettyType ty <> "`"
       where
         wf :: Int -> Type -> m ()
-        wf n ty | isBaseType ty = pure ()
+        wf n Unit = pure ()
+        wf n Int = pure ()
+        wf n Bool = pure ()
+        wf n String = pure ()
         wf n (TRef (LftVar 0 k) _ ty) 
             = if k < n then wf n ty 
                 else throwError "function argument contains an unspecified generic lifetime"
@@ -199,7 +201,7 @@ instance Typeable Term where
 
 instance Typeable Block where
     typeof (Block seqn) = do
-        ty <- modify pushBlock *> typeof seqn
+        ty <- modify E.pushBlock *> typeof seqn
         modify $ fromJust . E.popBlock . endlft
         case shift ty (-1) of
             Just ty' -> pure ty'

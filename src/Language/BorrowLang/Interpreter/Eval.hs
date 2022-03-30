@@ -2,46 +2,26 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ScopedTypeVariables, InstanceSigs #-}
 
-module Eval.Eval where
+module Language.BorrowLang.Interpreter.Eval where
 
-import qualified Eval.State as S
+import qualified Language.BorrowLang.Env as E
+import qualified Language.BorrowLang.Interpreter.Store as S
+import qualified Language.BorrowLang.Interpreter.Heap as H
+import Language.BorrowLang.Interpreter.Values ( Value(..) )
 
-import qualified Env as E
-import Indices ( Ix(..), toTuple, (<+>))
-import qualified Eval.Heap as H
-import qualified Data.Text as T
-import Syntax (Term(..), Seq(..), Deref(..), Block(..) )
+import Language.BorrowLang.Indices ( Ix(..), toTuple, (<+>) )
+import Language.BorrowLang.Syntax ( Term(..), Seq(..), Deref(..), Block(..) )
+
 import Control.Monad.State.Class ( MonadState(..), modify )
 import Control.Monad.Except ( MonadError(..) )
 import Control.Monad.IO.Class ( MonadIO(..) )
-import Data.Maybe (fromJust)
+
+import qualified Data.Text as T
+import Data.Maybe ( fromJust )
 import Data.Functor ( ($>) )
-import Control.Monad.Trans.Maybe ( MaybeT(..) )
--- import Control.Monad.Trans.Class ( MonadTrans(lift) )
-
-data Value
-    = VUnit
-    | VInt Int
-    | VBool Bool
-    | VRef Ix
-    | VPtr H.Location
-    | VString T.Text
-    | VCode Seq
-    | VMoved
-
-instance Show Value where
-    show VUnit = "()"
-    show (VInt n) = show n
-    show (VBool b) = show b
-    show (VRef ix) = "ref " <> show (toTuple ix)
-    show (VPtr _) = "<heap ptr>"
-    show (VString str) = show str
-    show (VCode _) = "<code>"
-    show VMoved = "MOVED" 
-
 data Tmp = Tmp deriving (Show)
 
-clone :: (MonadState (S.State Value) m, MonadError T.Text m) => Int -> Ix -> m (Either Tmp Value)
+clone :: (MonadState (S.Store Value) m, MonadError T.Text m) => Int -> Ix -> m (Either Tmp Value)
 clone n ix = do
     store <- get
     case deref n ix (S.env store) of
@@ -55,7 +35,7 @@ clone n ix = do
             VRef ix' -> pure $ Right $ VRef $ ix' <+> totalIx
             val -> pure $ Right val
 
-assign :: (MonadState (S.State Value) m, MonadIO m, MonadError T.Text m) => Int -> Ix -> Value -> m ()
+assign :: (MonadState (S.Store Value) m, MonadIO m, MonadError T.Text m) => Int -> Ix -> Value -> m ()
 assign n ix val = do
     s <- get
     case deref n ix (S.env s) of
@@ -70,14 +50,14 @@ assign n ix val = do
                     Nothing -> throwError "unexpected error: cannot insert value in temporary stack"
                     Just s' -> case val `shiftVal` totalIx of
                         Nothing -> throwError "unexpected error: cannot update value in environment as it would result in negative indices" 
-                        Just val' -> put $ fromJust $ S.adjust (const val') totalIx s'
+                        Just val' -> put $ S.adjust (const val') totalIx s'
             _ -> do
                 -- liftIO $ print $ "total ix: " <> show (toTuple totalIx) 
                 --     <> " OldValue: " <> show oldVal
                 --     <> " Value: " <> show val
                 get >>= \s -> case val `shiftVal` totalIx of
                     Nothing -> throwError "unexpected error: cannot update value in environment as it would result in negative indices" 
-                    Just val' -> put $ fromJust $ S.adjust (const val') totalIx s
+                    Just val' -> put $ S.adjust (const val') totalIx s
   where
     shiftVal :: Value -> Ix -> Maybe Value
     shiftVal (VRef ix) off = VRef <$> ix `ixAssignSub` off
@@ -95,25 +75,25 @@ deref :: Int -> Ix -> E.Env Value -> Maybe (Ix, Value)
 deref n ix = go n ix ix
   where
     go :: Int -> Ix -> Ix -> E.Env Value -> Maybe (Ix, Value)
-    go 0 ix off env = env `E.at` ix >>= \val -> Just (off, val)
-    go n (Ix 0 0) off (E.Env env) = case env of
+    go 0 ix off = \env -> env `E.at` ix >>= \val -> Just (off, val)
+    go n (Ix 0 0) off = \case
         [] -> Nothing 
-        (E.Block b):bs -> case b of
-            (VRef ix'):xs -> go (n-1) ix' (ix' <+> off) $ E.Env $ E.Block xs:bs
+        b:bs -> case b of
+            (VRef ix'):xs -> go (n-1) ix' (ix' <+> off) $ xs:bs
             _ -> Nothing
-    go n (Ix 0 k) off (E.Env env) = case env of
+    go n (Ix 0 k) off = \case
         [] -> Nothing
-        (E.Block b):bs -> case b of
-            x:xs -> go n (Ix 0 $ k-1) off $ E.Env $ E.Block xs:bs
+        b:bs -> case b of
+            x:xs -> go n (Ix 0 $ k-1) off $ xs:bs
             _ -> Nothing
-    go n (Ix m k) off (E.Env env) = case env of
+    go n (Ix m k) off = \case
         [] -> Nothing
-        b:bs -> go n (Ix (m-1) k) off $ E.Env bs
+        b:bs -> go n (Ix (m-1) k) off bs
 
 class Evaluable t where
-    eval :: forall m. (MonadState (S.State Value) m, MonadError T.Text m, MonadIO m) => t -> m (Either Tmp Value)
+    eval :: forall m. (MonadState (S.Store Value) m, MonadError T.Text m, MonadIO m) => t -> m (Either Tmp Value)
 
-fullEval :: (Evaluable t, MonadState (S.State Value) m, MonadError T.Text m, MonadIO m) => t -> m Value
+fullEval :: (Evaluable t, MonadState (S.Store Value) m, MonadError T.Text m, MonadIO m) => t -> m Value
 fullEval t = eval t >>= \case
     Left Tmp -> state S.popTmp >>= \case
         Nothing -> throwError "no temporary value to pop"
@@ -121,24 +101,24 @@ fullEval t = eval t >>= \case
     Right val -> pure val
 
 instance Evaluable Term where
-    eval :: forall m. (MonadState (S.State Value) m, MonadError T.Text m, MonadIO m) => Term -> m (Either Tmp Value)
+    eval :: forall m. (MonadState (S.Store Value) m, MonadError T.Text m, MonadIO m) => Term -> m (Either Tmp Value)
     -- Base values
     eval LitUnit = pure $ Right VUnit
     eval (LitInt n) = pure $ Right $ VInt n
     eval LitTrue = pure $ Right $ VBool True
     eval LitFalse = pure $ Right $ VBool False
     eval (LitString str) = do
-        state <- get
+        statstoree <- get
         modify $ fromJust . S.heapInsert (VString str)
         pure $ Left Tmp
     -- Variables
     eval (Var _ ix) = do
-        get >>= \state -> case state `S.at` ix of
+        get >>= \store -> case store `S.at` ix of
             Nothing -> throwError $ "cannot evaluate variable as there is no value at index " 
                 <> (T.pack . show . toTuple) ix <> " in the environment"
             Just VMoved -> throwError "error! use of moved value"
             Just (VPtr loc) -> do
-                modify $ fromJust . S.adjust (const VMoved) ix -- we know that there is a value at position ix
+                modify $ S.adjust (const VMoved) ix 
                 modify $ fromJust . S.pushTmp loc -- there is at least a value, hence at least a block
                 pure $ Left Tmp
             Just (VRef ix') -> pure . Right . VRef $ ix' <+> ix
@@ -233,11 +213,11 @@ instance Evaluable Seq where
         Seq t seqn -> eval t *> eval seqn
         Final t -> eval t
 
-popBlock :: S.State Value -> Maybe (S.State Value)
+popBlock :: S.Store Value -> Maybe (S.Store Value)
 popBlock s = case (S.tmp s, S.env s) of
-    (tmpBlock : tmp', E.Env (E.Block envBlock : env')) -> 
+    (tmpBlock : tmp', envBlock : env') -> 
         let heap' = batchDelete (S.heap s) $ tmpBlock <> getPtrs envBlock in
-        Just $ s { S.tmp = tmp', S.env = E.Env env', S.heap = heap' }
+        Just $ s { S.tmp = tmp', S.env = env', S.heap = heap' }
     _ -> Nothing
   where
     batchDelete :: H.Heap a -> [H.Location] -> H.Heap a 

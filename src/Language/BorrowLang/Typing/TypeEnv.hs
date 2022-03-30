@@ -1,14 +1,16 @@
 {-# LANGUAGE FlexibleContexts #-}
 
-module Typing.BetterEnv 
-  ( module Typing.BetterEnv
+module Language.BorrowLang.Typing.TypeEnv 
+  ( module Language.BorrowLang.Typing.TypeEnv
   , module E
   )
 where
 
-import qualified Env as E
-import Types ( RefType(..), Type )
-import Indices ( Ix, block )
+import qualified Language.BorrowLang.Env as E
+
+import Language.BorrowLang.Types ( RefType(..), Type )
+import Language.BorrowLang.Indices ( Ix, block )
+
 import qualified Data.Text as T
 import Control.Monad.Except ( MonadError(..) )
 
@@ -26,13 +28,13 @@ data BorrowStatus = Own | Borrow !RefType !Int | Moved
 insert :: MutStatus -> Type -> TEnv -> Maybe TEnv
 insert mu ty = E.insert $ Bind mu Own ty
 
-poison :: Ix -> TEnv -> Maybe TEnv
+poison :: Ix -> TEnv -> TEnv
 poison = E.adjust f
   where
     f :: Bind -> Bind
     f (Bind mu _ ty) = Bind mu Moved ty
 
-borrow :: RefType -> Ix -> TEnv -> Maybe TEnv
+borrow :: RefType -> Ix -> TEnv -> TEnv
 borrow refTy ix = E.adjust f ix
   where
     f :: Bind -> Bind
@@ -41,18 +43,18 @@ borrow refTy ix = E.adjust f ix
     status :: BorrowStatus
     status = Borrow refTy $ -block ix
 
-borrowShr :: Ix -> TEnv -> Maybe TEnv
+borrowShr :: Ix -> TEnv -> TEnv
 borrowShr = borrow Shr
 
-borrowUniq :: Ix -> TEnv -> Maybe TEnv
+borrowUniq :: Ix -> TEnv -> TEnv
 borrowUniq = borrow Uniq
 
 endlft :: TEnv -> TEnv
-endlft (E.Env env) = E.Env $ go 0 env
+endlft = go 0 
   where
     go :: Int -> [E.Block Bind] -> [E.Block Bind]
     go _ [] = []
-    go n (E.Block b:bs) = E.Block (f n <$> b) : go n bs
+    go n (b:bs) = (f n <$> b) : go n bs
 
     f :: Int -> Bind -> Bind
     f n bind = case bind of

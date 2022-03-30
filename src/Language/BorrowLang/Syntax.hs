@@ -1,8 +1,8 @@
-module Syntax where
+module Language.BorrowLang.Syntax where
 
 import Data.Text as T
-import Indices ( Ix(..) )
-import Types ( Type, Lft )
+import Language.BorrowLang.Indices ( Ix(..) )
+import Language.BorrowLang.Types ( Type, Lft )
 
 data Seq 
     = Let T.Text Term Seq

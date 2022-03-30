@@ -1,14 +1,23 @@
-module Eval.Heap 
+module Language.BorrowLang.Interpreter.Heap 
     ( Location
     , Heap
     , empty
     , insert
     , delete
-    , Eval.Heap.lookup
+    , lookup
     ) where
 
+import Prelude hiding ( lookup )
+
 import Data.IntMap (IntMap)
-import qualified Data.IntMap.Strict as M ( empty, insert, member, delete, lookup )
+import qualified Data.IntMap.Strict as M 
+    ( empty
+    , insert
+    , member
+    , delete
+    , lookup
+    , adjust
+    )
 
 import qualified Data.Text as T
 
@@ -56,3 +65,6 @@ delete h (Location l)
 
 lookup :: Heap v -> Location -> Maybe v
 lookup h (Location l) = M.lookup l (mem h)
+
+adjust :: (v -> v) -> Location -> Heap v -> Heap v
+adjust f (Location l) h = h { mem = M.adjust f l (mem h) }

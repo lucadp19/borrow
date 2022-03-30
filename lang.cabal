@@ -25,17 +25,16 @@ source-repository head
 
 library
   exposed-modules:
-      Env
-      Eval.Eval
-      Eval.Heap
-      Eval.State
-      Indices
-      Lib
-      Syntax
-      Types
-      Typing.BetterEnv
-      Typing.Check
-      Typing.Env
+      Language.BorrowLang.Env
+      Language.BorrowLang.Indices
+      Language.BorrowLang.Interpreter.Eval
+      Language.BorrowLang.Interpreter.Heap
+      Language.BorrowLang.Interpreter.Store
+      Language.BorrowLang.Interpreter.Values
+      Language.BorrowLang.Syntax
+      Language.BorrowLang.Types
+      Language.BorrowLang.Typing.Check
+      Language.BorrowLang.Typing.TypeEnv
   other-modules:
       Paths_lang
   hs-source-dirs:

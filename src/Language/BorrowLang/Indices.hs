@@ -1,4 +1,4 @@
-module Indices where
+module Language.BorrowLang.Indices where
 
 data Ix = Ix !Int !Int
     deriving (Eq)
