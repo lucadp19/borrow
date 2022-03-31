@@ -17,6 +17,7 @@ import Language.BorrowLang.Syntax ( Deref(..), Term(..), Seq(..), Block(..) )
 import qualified Data.Text as T
 import Data.Maybe ( fromJust )
 import Data.String ( IsString(..) )
+import Data.Functor ( ($>) )
 
 import Control.Monad.State.Class ( MonadState(..), gets, modify )
 import Control.Monad.Reader.Class ( MonadReader(..), asks )
@@ -76,6 +77,37 @@ derefMut (Deref n ix) =
         TRef _ Shr _ -> throwError "cannot mutably dereference a shared reference"
         _ -> throwError "cannot mutably dereference a non-pointer type"
 
+reborrow :: (MonadState TEnv m, MonadError T.Text m) => Deref -> m Type
+reborrow (Deref 0 ix) = do
+    Bind _ status ty <- get >>= \env -> case env `E.at` ix of
+        Just val -> pure val
+        Nothing -> throwError $ invalidIxErr ix
+    case status of
+        Own -> modify (borrowShr ix) $> ty
+        Borrow Shr _ -> pure ty
+        Borrow Uniq _ -> throwError "cannot reborrow an already mutably borrowed pointer"
+        Moved -> throwError "cannot reborrow a reborrowed pointer"
+reborrow (Deref n ix) = 
+    reborrow (Deref (n-1) ix) >>= \case
+        TRef _ _ ty -> pure ty
+        _ -> throwError "cannot reborrow a non-pointer type"
+
+reborrowMut :: (MonadState TEnv m, MonadError T.Text m) => Deref -> m Type
+reborrowMut (Deref 0 ix) = do
+    Bind _ status ty <- get >>= \env -> case env `E.at` ix of
+        Just val -> pure val
+        Nothing -> throwError $ invalidIxErr ix
+    case status of
+        Own -> modify (borrowUniq ix) $> ty
+        Borrow Shr _ -> throwError "cannot mutably reborrow an already borrowed pointer"
+        Borrow Uniq _ -> throwError "cannot mutably reborrow an already mutably borrowed pointer"
+        Moved -> throwError "cannot mutably reborrow a reborrowed pointer"
+reborrowMut (Deref n ix) = 
+    reborrowMut (Deref (n-1) ix) >>= \case
+        TRef _ Uniq ty -> pure ty
+        TRef _ Shr ty -> throwError "cannot mutably reborrow a shared reference"
+        _ -> throwError "cannot mutably reborrow a non-pointer type"     
+
 -- TODO: move this
 out :: MonadState s m => m a -> m (a, s)
 out m = do
@@ -122,7 +154,7 @@ instance Typeable Term where
             then pure Unit
             else throwError $ "type mismatch: expected `" <> prettyType ty <> "` but got `" <> prettyType ty' <> "`" 
     -- Shared reference
-    typeof (Ref name ix) = do
+    typeof (Ref name (Deref 0 ix)) = do
         Bind _ status ty <- get >>= \env -> case env `E.at` ix of
             Just val -> pure val
             Nothing -> throwError $ invalidIxErr ix
@@ -132,7 +164,7 @@ instance Typeable Term where
             Borrow Uniq _ -> throwError $ "cannot create shared reference to `" <> name <> "` as it is currently mutably borrowed"
             Moved -> throwError $ "cannot create shared reference to `" <> name <> "` as it has been moved"
     -- Unique reference
-    typeof (RefMut name ix) = do
+    typeof (RefMut name (Deref 0 ix)) = do
         Bind mu status ty <- get >>= \env -> case env `E.at` ix of
             Just val -> pure val
             Nothing -> throwError $ invalidIxErr ix
@@ -141,6 +173,9 @@ instance Typeable Term where
             (Mut, Borrow _ _) -> throwError $ "cannot create mutable reference to `" <> name <> "` as it is already borrowed"
             (Mut, Moved) -> throwError $ "cannot create mutable reference to `" <> name <> "` as it has already been moved"
             (Imm, _) -> throwError $ "cannot create mutable reference to `" <> name <> "`as it has not been declared as `mut`" 
+    -- Immutable reborrow
+    typeof (Ref name deref) = reborrow deref
+    typeof (RefMut name deref) = reborrowMut deref
     -- Conditional expression
     typeof (IfThenElse cond t1 t2) = do
         tyCond <- typeof cond

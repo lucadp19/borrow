@@ -127,8 +127,15 @@ instance Evaluable Term where
     -- Clone
     eval (Clone (Deref n ix)) = clone n ix
     -- References
-    eval (Ref _ ix) = pure . Right $ VRef ix
-    eval (RefMut _ ix) = pure . Right $ VRef ix
+    eval (Ref _ (Deref 0 ix)) = pure . Right $ VRef ix
+    eval (RefMut _ (Deref 0 ix)) = pure . Right $ VRef ix
+    -- Reborrows
+    eval (Ref _ (Deref n ix)) = get >>= \store -> case deref n ix (S.env store) of
+        Just (ix', _) -> pure . Right . VRef $ ix'
+        Nothing -> throwError "cannot dereference value in reborrow"
+    eval (RefMut _ (Deref n ix)) = get >>= \store -> case deref n ix (S.env store) of
+        Just (ix', _) -> pure . Right . VRef $ ix'
+        Nothing -> throwError "cannot dereference value in reborrow"
     -- Assignment
     eval (Assign (Deref n ix) t) = do
         value <- fullEval t

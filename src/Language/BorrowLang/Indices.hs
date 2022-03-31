@@ -1,7 +1,7 @@
 module Language.BorrowLang.Indices where
 
 data Ix = Ix !Int !Int
-    deriving (Eq)
+    deriving (Eq, Show)
 
 block :: Ix -> Int
 block (Ix n _) = n

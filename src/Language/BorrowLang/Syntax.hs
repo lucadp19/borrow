@@ -9,6 +9,7 @@ data Seq
     | LetMut T.Text Term Seq
     | Seq Term Seq
     | Final Term
+  deriving (Show)
 
 data Term
     = LitUnit
@@ -21,12 +22,15 @@ data Term
     | Clone Deref
     | Assign Deref Term
     | TBlock Block
-    | Ref T.Text Ix
-    | RefMut T.Text Ix
+    | Ref T.Text Deref
+    | RefMut T.Text Deref
     | Fn Int ([Type], Type) Block
     | Appl Term [Lft] [Term]
+  deriving (Show)
 
 newtype Block = Block Seq
+  deriving (Show)
 
 data Deref
     = Deref !Int !Ix
+  deriving (Show)
