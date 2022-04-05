@@ -1,10 +1,10 @@
-name:                lang
+name:                borrow
 version:             0.1.0.0
-github:              "githubuser/lang"
+github:              "lucadp19/borrow"
 license:             BSD3
-author:              "Author name here"
-maintainer:          "example@example.com"
-copyright:           "2022 Author name here"
+author:              "Luca De Paulis"
+maintainer:          "luca.dp1909@gmail.com"
+copyright:           "2022 Luca De Paulis"
 
 extra-source-files:
 - README.md
@@ -27,12 +27,14 @@ dependencies:
 - transformers
 - megaparsec
 - parser-combinators
+- optparse-applicative
+- pretty-simple
 
 library:
   source-dirs: src
 
 executables:
-  lang-exe:
+  borrow:
     main:                Main.hs
     source-dirs:         app
     ghc-options:
@@ -40,15 +42,15 @@ executables:
     - -rtsopts
     - -with-rtsopts=-N
     dependencies:
-    - lang
+    - borrow
 
-tests:
-  lang-test:
-    main:                Spec.hs
-    source-dirs:         test
-    ghc-options:
-    - -threaded
-    - -rtsopts
-    - -with-rtsopts=-N
-    dependencies:
-    - lang
+# tests:
+#   lang-test:
+#     main:                Spec.hs
+#     source-dirs:         test
+#     ghc-options:
+#     - -threaded
+#     - -rtsopts
+#     - -with-rtsopts=-N
+#     dependencies:
+#     - lang

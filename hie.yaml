@@ -1,13 +1,10 @@
 cradle:
   stack:
     - path: "./src"
-      component: "lang:lib"
+      component: "borrow:lib"
 
     - path: "./app/Main.hs"
-      component: "lang:exe:lang-exe"
+      component: "borrow:exe:borrow"
 
-    - path: "./app/Paths_lang.hs"
-      component: "lang:exe:lang-exe"
-
-    - path: "./test"
-      component: "lang:test:lang-test"
+    - path: "./app/Paths_borrow.hs"
+      component: "borrow:exe:borrow"

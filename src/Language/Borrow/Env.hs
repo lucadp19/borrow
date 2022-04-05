@@ -2,13 +2,24 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-module Language.BorrowLang.Env where
+module Language.Borrow.Env 
+  ( Env
+  , Block
+  , empty
+  , pos
+  , at
+  , adjust
+  , insert
+  , pushBlock
+  , pushBlockWithArgs
+  , popBlock
+  )
+where
 
 import qualified Data.Text as T
 import Data.List ( elemIndex )
-import Control.Monad.Except ( MonadError(..) )
 
-import Language.BorrowLang.Indices ( Ix(..) )
+import Language.Borrow.Indices ( Ix(..) )
 
 -- | A block in an environment.
 -- 

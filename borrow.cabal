@@ -1,0 +1,75 @@
+cabal-version: 1.12
+
+-- This file has been generated from package.yaml by hpack version 0.34.4.
+--
+-- see: https://github.com/sol/hpack
+
+name:           borrow
+version:        0.1.0.0
+description:    Please see the README on GitHub at <https://github.com/githubuser/lang#readme>
+homepage:       https://github.com/lucadp19/borrow#readme
+bug-reports:    https://github.com/lucadp19/borrow/issues
+author:         Luca De Paulis
+maintainer:     luca.dp1909@gmail.com
+copyright:      2022 Luca De Paulis
+license:        BSD3
+license-file:   LICENSE
+build-type:     Simple
+extra-source-files:
+    README.md
+    ChangeLog.md
+
+source-repository head
+  type: git
+  location: https://github.com/lucadp19/borrow
+
+library
+  exposed-modules:
+      Language.Borrow.App
+      Language.Borrow.Env
+      Language.Borrow.Indices
+      Language.Borrow.Interpreter.Eval
+      Language.Borrow.Interpreter.Heap
+      Language.Borrow.Interpreter.Store
+      Language.Borrow.Interpreter.Values
+      Language.Borrow.Parser.Parser
+      Language.Borrow.Parser.ParserEnv
+      Language.Borrow.Syntax
+      Language.Borrow.Types
+      Language.Borrow.Typing.Check
+      Language.Borrow.Typing.TypeEnv
+  other-modules:
+      Paths_borrow
+  hs-source-dirs:
+      src
+  build-depends:
+      base >=4.7 && <5
+    , containers
+    , megaparsec
+    , mtl
+    , optparse-applicative
+    , parser-combinators
+    , pretty-simple
+    , text
+    , transformers
+  default-language: Haskell2010
+
+executable borrow
+  main-is: Main.hs
+  other-modules:
+      Paths_borrow
+  hs-source-dirs:
+      app
+  ghc-options: -threaded -rtsopts -with-rtsopts=-N
+  build-depends:
+      base >=4.7 && <5
+    , borrow
+    , containers
+    , megaparsec
+    , mtl
+    , optparse-applicative
+    , parser-combinators
+    , pretty-simple
+    , text
+    , transformers
+  default-language: Haskell2010

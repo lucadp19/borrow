@@ -1,4 +1,4 @@
-module Language.BorrowLang.Interpreter.Heap 
+module Language.Borrow.Interpreter.Heap 
     ( Location
     , Heap
     , empty
@@ -6,6 +6,7 @@ module Language.BorrowLang.Interpreter.Heap
     , delete
     , deleteMultiple
     , lookup
+    , adjust
     ) where
 
 import Prelude hiding ( lookup )
@@ -33,6 +34,7 @@ data Heap v = Heap
 
 -- | A location in a heap.
 newtype Location = Location Int
+  deriving (Eq)
 
 -- | The empty heap.
 empty :: Heap v
@@ -88,5 +90,7 @@ lookup :: Heap v        -- ^ The given heap.
        -> Maybe v
 lookup h (Location l) = M.lookup l (mem h)
 
+-- | Adjusts the value at the given location through the given function.
+-- If no value is present at the given location, the original heap is returned.
 adjust :: (v -> v) -> Location -> Heap v -> Heap v
 adjust f (Location l) h = h { mem = M.adjust f l (mem h) }

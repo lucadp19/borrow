@@ -3,16 +3,22 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables, InstanceSigs #-}
 
-module Language.BorrowLang.Typing.Check where
+module Language.Borrow.Typing.Check ( Typeable(..) ) where
 
 import Prelude hiding ( read )
 
-import Language.BorrowLang.Typing.TypeEnv
-import qualified Language.BorrowLang.Env as E
+import qualified Language.Borrow.Env as E
+import Language.Borrow.Typing.TypeEnv
+    ( borrowShr, borrowUniq
+    , endlft, insert, poison
+    , Bind(..)
+    , BorrowStatus(..)
+    , MutStatus(..)
+    , TEnv )
 
-import Language.BorrowLang.Indices ( Ix(..), block, toTuple )
-import Language.BorrowLang.Types ( Type(..), RefType(..), Lft(..), shift, (<:), prettyType )
-import Language.BorrowLang.Syntax ( Deref(..), Term(..), Seq(..), Block(..) )
+import Language.Borrow.Indices ( Ix(..), toTuple )
+import Language.Borrow.Types ( Type(..), RefType(..), Lft(..), shift, (<:), prettyType, baseType )
+import Language.Borrow.Syntax ( Deref(..), Term(..), Seq(..), Block(..), BinaryOp(..), UnaryOp(..), prettyBin )
 
 import qualified Data.Text as T
 import Data.Maybe ( fromJust )
@@ -26,97 +32,101 @@ import Control.Monad ( when, unless )
 import Control.Monad.IO.Class ( MonadIO(..) )
 import Control.Monad.Except ( MonadError(throwError) )
 
+-- | Returns true if and only if the type is copy.
 copy :: Type -> Bool
 copy Unit = True
 copy Bool = True
 copy Int = True
-copy (TRef _ Shr t) = copy t
+copy (TRef _ Shr t) = True
 copy _ = False
 
+-- | Returns true if and only if the type is clone.
 clone :: Type -> Bool
 clone (TRef _ Uniq _) = False
 clone _ = True
 
+-- | Immutably dereferences a @Deref@ - used in typing @clone@.
 deref :: (MonadReader TEnv m, MonadError T.Text m) => Deref -> m Type
-deref (Deref 0 ix) = do
+deref (Deref name 0 ix) = do
     Bind _ status ty <- ask >>= \env -> case env `E.at` ix of
         Just val -> pure val
         Nothing -> throwError $ invalidIxErr ix
     case status of
-        Moved -> throwError "cannot dereference a moved pointer"
+        Moved -> throwError $ "cannot dereference `" <> name <> "` as it has been moved"
         _ -> pure ty
-deref (Deref n ix) =
-    deref (Deref (n-1) ix) >>= \case
+deref (Deref name n ix) =
+    deref (Deref name (n-1) ix) >>= \case
         TRef _ _ ty -> pure ty
         _ -> throwError "cannot dereference a non-pointer type"
 
+-- | Used in typing the LHS in assignments.
 mut :: (MonadReader TEnv m, MonadError T.Text m) => Deref -> m Type
-mut (Deref 0 ix) = do
+mut (Deref name 0 ix) = do
     Bind mu status ty <- ask >>= \env -> case env `E.at` ix of
         Just val -> pure val
         Nothing -> throwError $ invalidIxErr ix
     case (mu, status) of
         (Mut, Own) -> pure ty
         (Mut, Moved) -> pure ty
-        (Mut, _) -> throwError "cannot assign to a borrowed variable"
-        (Imm, _) -> throwError "cannot assign to an immutable variable"
+        (Mut, _) -> throwError $ "cannot assign to `" <> name <> "` since it is a borrowed variable"
+        (Imm, _) -> throwError $ "cannot assign to `" <> name <> "` since it is an immutable variable"
 mut p = derefMut p
 
+-- | Mutably dereferences the LHS of an assignment.
 derefMut :: (MonadReader TEnv m, MonadError T.Text m) => Deref -> m Type
-derefMut (Deref 0 ix) = do
+derefMut (Deref name 0 ix) = do
     Bind _ status ty <- ask >>= \env -> case env `E.at` ix of
         Just val -> pure val
         Nothing -> throwError $ invalidIxErr ix
     case status of
         Own -> pure ty
-        Borrow _ _ -> throwError "cannot mutably dereference a borrowed reference"
-        Moved -> throwError "cannot mutably dereference a moved reference"
-derefMut (Deref n ix) =
-    derefMut (Deref (n-1) ix) >>= \case
+        Borrow _ _ -> throwError $ "cannot mutably dereference `" <> name <> "` since it has been borrowed"
+        Moved -> throwError $ "cannot mutably dereference `" <> name <> "` since it has been moved"
+derefMut (Deref name n ix) =
+    derefMut (Deref name (n-1) ix) >>= \case
         TRef _ Uniq ty -> pure ty
         TRef _ Shr _ -> throwError "cannot mutably dereference a shared reference"
         _ -> throwError "cannot mutably dereference a non-pointer type"
 
+-- | Immmutably reborrows a value.
 reborrow :: (MonadState TEnv m, MonadError T.Text m) => Deref -> m Type
-reborrow (Deref 0 ix) = do
+reborrow (Deref name 0 ix) = do
     Bind _ status ty <- get >>= \env -> case env `E.at` ix of
         Just val -> pure val
         Nothing -> throwError $ invalidIxErr ix
     case status of
         Own -> modify (borrowShr ix) $> ty
         Borrow Shr _ -> pure ty
-        Borrow Uniq _ -> throwError "cannot reborrow an already mutably borrowed pointer"
-        Moved -> throwError "cannot reborrow a reborrowed pointer"
-reborrow (Deref n ix) = 
-    reborrow (Deref (n-1) ix) >>= \case
+        Borrow Uniq _ -> throwError $ "cannot reborrow `" <> name <> "` since it has already been mutably borrowed"
+        Moved -> throwError $ "cannot reborrow `" <> name <> "` since it has been moved"
+reborrow (Deref name n ix) = 
+    reborrow (Deref name (n-1) ix) >>= \case
         TRef _ _ ty -> pure ty
         _ -> throwError "cannot reborrow a non-pointer type"
 
+-- | Mutably reborrows a value.
 reborrowMut :: (MonadState TEnv m, MonadError T.Text m) => Deref -> m Type
-reborrowMut (Deref 0 ix) = do
+reborrowMut (Deref name 0 ix) = do
     Bind _ status ty <- get >>= \env -> case env `E.at` ix of
         Just val -> pure val
         Nothing -> throwError $ invalidIxErr ix
     case status of
         Own -> modify (borrowUniq ix) $> ty
-        Borrow Shr _ -> throwError "cannot mutably reborrow an already borrowed pointer"
-        Borrow Uniq _ -> throwError "cannot mutably reborrow an already mutably borrowed pointer"
-        Moved -> throwError "cannot mutably reborrow a reborrowed pointer"
-reborrowMut (Deref n ix) = 
-    reborrowMut (Deref (n-1) ix) >>= \case
+        Borrow Shr _ -> throwError $ "cannot mutably reborrow `" <> name <> "` since it has already been borrowed"
+        Borrow Uniq _ -> throwError $ "cannot mutably reborrow `" <> name <> "` since it has already been mutably borrowed"
+        Moved -> throwError $ "cannot mutably reborrow `" <> name <> "` since it has already been moved"
+reborrowMut (Deref name n ix) = 
+    reborrowMut (Deref name (n-1) ix) >>= \case
         TRef _ Uniq ty -> pure ty
         TRef _ Shr ty -> throwError "cannot mutably reborrow a shared reference"
         _ -> throwError "cannot mutably reborrow a non-pointer type"     
 
--- TODO: move this
-out :: MonadState s m => m a -> m (a, s)
-out m = do
-    s <- get
-    val <- m
-    pure (val, s)
-
+-- | A typeclass for all syntactic structures that are typeable in an environment.
 class Typeable t where
-    typeof :: forall m. (MonadState TEnv m, MonadError T.Text m) => t -> m Type
+    typeof 
+        :: forall m. (MonadState TEnv m, MonadError T.Text m) 
+        => t        -- ^ The structure to type
+        -> m Type   -- ^ The resulting type
 
 instance Typeable Term where
     typeof :: forall m. (MonadState TEnv m, MonadError T.Text m) => Term -> m Type
@@ -144,6 +154,52 @@ instance Typeable Term where
                     pure . fromJust $ shift ty n    -- n >= 0 implies that the result is a Just
                 Borrow _ _ -> throwError $ "cannot use variable `" <> name <> "`as it is currently borrowed"
                 Moved -> throwError $ "cannot use variable `" <> name <> "` as it has already been moved"
+    -- Binary operations
+    typeof (Binary op t1 t2) = case op of
+        op | op `elem` [Sum, Sub, Prod, Div] -> do
+            t1 <- typeof t1
+            t2 <- typeof t2
+            case (t1, t2) of
+                (Int, Int) -> pure Int
+                _ -> throwError $ "can only apply `" <> prettyBin op <> "` on values of type `Int`"
+        op | op `elem` [Leq, Geq, Less, More] -> do
+            t1 <- typeof t1
+            t2 <- typeof t2
+            case (t1, t2) of
+                (Int, Int) -> pure Bool
+                _ -> throwError $ "can only apply `" <> prettyBin op <> "` on values of type `Int`"
+        op | op `elem` [And, Or] -> do
+            t1 <- typeof t1
+            t2 <- typeof t2
+            case (t1, t2) of
+                (Bool, Bool) -> pure Bool
+                _ -> throwError $ "can only apply `" <> prettyBin op <> "` on values of type `Bool`"
+        Concat -> do
+            t1 <- typeof t1
+            t2 <- typeof t2
+            case (t1, t2) of
+                (String, String) -> pure String
+                _ -> throwError $ "can only apply `" <> prettyBin op <> "` on values of type `String`"
+        Eq -> do
+            t1 <- baseType <$> typeof t1
+            t2 <- baseType <$> typeof t2
+            if t1 /= t2 
+                then throwError $ "can only apply `" <> prettyBin op <> "` on values of the same type"
+                else pure Bool
+    -- Unary operations
+    typeof (Unary op t) = case op of
+        Neg -> typeof t >>= \case
+            Int -> pure Int
+            _ -> throwError "can only apply unary `-` on values of type `Int`"
+        Not -> typeof t >>= \case
+            Bool -> pure Bool
+            _ -> throwError "can only apply unary `!` on values of type `Bool`"
+    -- Println
+    typeof (Println terms) = typeAll terms $> Unit
+      where
+        typeAll :: [Term] -> m Type
+        typeAll [] = pure Unit
+        typeAll (t:ts) = typeof t *> typeAll ts
     -- Clones
     typeof (Clone p) = get >>= runReaderT (deref p)
     -- Assignment
@@ -154,7 +210,7 @@ instance Typeable Term where
             then pure Unit
             else throwError $ "type mismatch: expected `" <> prettyType ty <> "` but got `" <> prettyType ty' <> "`" 
     -- Shared reference
-    typeof (Ref name (Deref 0 ix)) = do
+    typeof (Ref (Deref name 0 ix)) = do
         Bind _ status ty <- get >>= \env -> case env `E.at` ix of
             Just val -> pure val
             Nothing -> throwError $ invalidIxErr ix
@@ -164,7 +220,7 @@ instance Typeable Term where
             Borrow Uniq _ -> throwError $ "cannot create shared reference to `" <> name <> "` as it is currently mutably borrowed"
             Moved -> throwError $ "cannot create shared reference to `" <> name <> "` as it has been moved"
     -- Unique reference
-    typeof (RefMut name (Deref 0 ix)) = do
+    typeof (RefMut (Deref name 0 ix)) = do
         Bind mu status ty <- get >>= \env -> case env `E.at` ix of
             Just val -> pure val
             Nothing -> throwError $ invalidIxErr ix
@@ -174,15 +230,17 @@ instance Typeable Term where
             (Mut, Moved) -> throwError $ "cannot create mutable reference to `" <> name <> "` as it has already been moved"
             (Imm, _) -> throwError $ "cannot create mutable reference to `" <> name <> "`as it has not been declared as `mut`" 
     -- Immutable reborrow
-    typeof (Ref name deref) = reborrow deref
-    typeof (RefMut name deref) = reborrowMut deref
+    typeof (Ref deref) = reborrow deref
+    typeof (RefMut deref) = reborrowMut deref
     -- Conditional expression
     typeof (IfThenElse cond t1 t2) = do
         tyCond <- typeof cond
         when (tyCond /= Bool) $ throwError $ "type mismatch: expected `bool` but got `" <> prettyType tyCond <> "`"
         env <- get
-        (ty1, env') <- out $ typeof t1
-        (ty2, env'') <- put env *> out (typeof t2)
+        (ty1, env') <- (,) <$> typeof t1 <*> get
+        (ty2, env'') <- do
+            put env 
+            (,) <$> typeof t1 <*> get
         if ty1 == ty2 && env' == env''
             then pure ty1
             else throwError "types and environment of if branches must be equal"
@@ -190,14 +248,14 @@ instance Typeable Term where
     typeof (TBlock block) = typeof block
     -- Function abstraction
     typeof (Fn n (params, outTy) (Block body)) = do
-        wf n $ TFn n params outTy -- checking that the type is valid
+        wf n $ TFn n (snd <$> params) outTy -- checking that the type is valid
         env <- get
-        let fnEnv = E.pushBlockWithArgs ((\ty -> Bind Imm Own ty) <$> params) mempty
+        let fnEnv = E.pushBlockWithArgs ((\(mu, ty) -> Bind mu Own ty) <$> params) mempty
         ty <- put fnEnv *> typeof body >>= \res -> case shift res (-1) of
             Nothing -> throwError "cannot return value from function as it does not live long enough"
             Just ty -> pure ty
         if ty <: outTy
-            then TFn n params outTy <$ put env
+            then TFn n (snd <$> params) outTy <$ put env
             else throwError $ "type mismatch: expected `" <> prettyType outTy <> "` but got `" <> prettyType ty <> "`"
       where
         wf :: Int -> Type -> m ()
