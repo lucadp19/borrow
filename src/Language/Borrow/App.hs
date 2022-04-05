@@ -110,8 +110,8 @@ typecheck program = case parse program parseTerm of
     Right term -> do
         result <- runExceptT $ runStateT (typeof term) E.empty 
         case result of
-            Left err -> putStrLn $ "\x1b[31mtype error: \x1b[0m" <> T.unpack err
-            Right (ty, _) -> putStrLn $ "The given term has type `" <> show ty <> "`."
+            Left err -> putStrLn $ "❯ \x1b[31mtype error: \x1b[0m" <> T.unpack err
+            Right (ty, _) -> putStrLn $ "❯ The given term has type `" <> show ty <> "`."
 
 -- | Parses, types and then executes a program.
 exec :: T.Text -> IO ()
@@ -120,17 +120,17 @@ exec program = case parse program parseBlock of
     Right block -> do
         tyRes <- runExceptT $ runStateT (typeof block) E.empty 
         case tyRes of
-            Left typeErr -> putStrLn $ "\x1b[31mtype error: \x1b[0m" <> T.unpack typeErr
+            Left typeErr -> putStrLn $ "❯ \x1b[31mtype error: \x1b[0m" <> T.unpack typeErr
             Right (Unit, store) -> do
                 execRes <- runExceptT $ runStateT (eval block) S.empty 
                 case execRes of
-                    Left err -> putStrLn $ "\x1b[31mruntime error: \x1b[0m" <> T.unpack err
+                    Left err -> putStrLn $ "❯ \x1b[31mruntime error: \x1b[0m" <> T.unpack err
                     Right (val, store) -> pure () -- checkHeap store
-            Right ty -> putStrLn "\x1b[31merror:\x1b[0m a valid program is a block of type `Unit`"
+            Right ty -> putStrLn "❯ \x1b[31merror:\x1b[0m a valid program is a block of type `Unit`"
   where
     checkHeap :: S.Store Value -> IO ()
     checkHeap store = if H.isEmpty (S.heap store) 
-        then putStrLn "The heap has been correctly cleaned."
+        then putStrLn "❯ The heap has been correctly cleaned."
         else do
-            putStrLn "The heap has not been correctly cleaned. Printing the remaining heap."
+            putStrLn "❯The heap has not been correctly cleaned. Printing the remaining heap."
             pPrintOpt CheckColorTty printOpts $ S.heap store
