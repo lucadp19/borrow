@@ -221,6 +221,7 @@ instance Evaluable Term where
         loc <- fullEval fn >>= \case
             VPtr loc -> pure loc
             _ -> throwError "function value was not a heap pointer" 
+        modify $ fromJust . S.pushTmp loc -- discarding the used pointer
         body <- get >>= \store -> case S.heapLookup loc store of
             Nothing -> throwError "error: cannot find location in heap"
             Just (VCode seqn) -> pure seqn

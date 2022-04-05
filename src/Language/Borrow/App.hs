@@ -13,6 +13,7 @@ import qualified Language.Borrow.Parser.ParserEnv as PE
 import qualified Language.Borrow.Env as E
 import qualified Language.Borrow.Typing.TypeEnv as TE
 import qualified Language.Borrow.Interpreter.Store as S
+import qualified Language.Borrow.Interpreter.Heap as H
 
 import Language.Borrow.Typing.Check ( Typeable(typeof) )
 import Language.Borrow.Interpreter.Eval ( Evaluable(eval) )
@@ -88,12 +89,13 @@ run = do
             Right term -> pPrintOpt CheckColorTty printOpts term
         Type -> typecheck program
         Exec -> exec program
-  where
-    printOpts = defaultOutputOptionsDarkBg 
-        { outputOptionsIndentAmount = 2
-        , outputOptionsCompact = True
-        , outputOptionsCompactParens = True
-        }
+
+printOpts :: OutputOptions
+printOpts = defaultOutputOptionsDarkBg 
+    { outputOptionsIndentAmount = 2
+    , outputOptionsCompact = True
+    , outputOptionsCompactParens = True
+    }
 
 -- | Applies the given parser on a string.
 parse :: T.Text                                     -- ^ The string to parse
@@ -119,9 +121,16 @@ exec program = case parse program parseBlock of
         tyRes <- runExceptT $ runStateT (typeof block) E.empty 
         case tyRes of
             Left typeErr -> putStrLn $ "\x1b[31mtype error: \x1b[0m" <> T.unpack typeErr
-            Right (Unit, _) -> do
+            Right (Unit, store) -> do
                 execRes <- runExceptT $ runStateT (eval block) S.empty 
                 case execRes of
-                    Left err -> putStr $ "\x1b[31mruntime error: \x1b[0m" <> T.unpack err
-                    Right (store, val) -> pure ()
+                    Left err -> putStrLn $ "\x1b[31mruntime error: \x1b[0m" <> T.unpack err
+                    Right (val, store) -> pure () -- checkHeap store
             Right ty -> putStrLn "\x1b[31merror:\x1b[0m a valid program is a block of type `Unit`"
+  where
+    checkHeap :: S.Store Value -> IO ()
+    checkHeap store = if H.isEmpty (S.heap store) 
+        then putStrLn "The heap has been correctly cleaned."
+        else do
+            putStrLn "The heap has not been correctly cleaned. Printing the remaining heap."
+            pPrintOpt CheckColorTty printOpts $ S.heap store

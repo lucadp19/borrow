@@ -2,6 +2,7 @@ module Language.Borrow.Interpreter.Heap
     ( Location
     , Heap
     , empty
+    , isEmpty
     , insert
     , delete
     , deleteMultiple
@@ -31,6 +32,7 @@ data Heap v = Heap
     , size :: !Int    -- ^ The number of elements currently stored.
     , free :: [Int]   -- ^ A free list, containing the indices of the free blocks.
     } 
+  deriving (Show)
 
 -- | A location in a heap.
 newtype Location = Location Int
@@ -43,6 +45,10 @@ empty = Heap
     , size = 0
     , free = []
     }
+
+-- | Checks whether the given heap is empty or not.
+isEmpty :: Heap v -> Bool
+isEmpty h = size h == 0
 
 -- | Inserts a value into a heap, returning the modified heap and the location of the newly inserted value.
 insert :: v                     -- ^ The value to be inserted.

@@ -228,7 +228,7 @@ parseFinal = Final <$> parseTerm
 
 -- | Parses a complex term.
 parseComplex :: Parser Term
-parseComplex = dbg "complex" $ choice 
+parseComplex = choice 
    [ parseAppl
    , parseIf
    , parseFn
@@ -300,7 +300,7 @@ parseAppl = do
 
 -- | Parses a function abstraction.
 parseFn :: Parser Term
-parseFn = dbg "fn" $ do
+parseFn = do
     _ <- symbol "fn"
     lftList <- label "list of generic lifetimes in angular parenthesis" $ 
         symbol "<" *> parseGenericLfts <* symbol ">"
